@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Pro 本机计数器
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.2
+// @version      1.1.3
 // @homepageURL  https://github.com/YuSaZh/GPT-Pro-Counter
 // @supportURL   https://github.com/YuSaZh/GPT-Pro-Counter/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/GPT-Pro-Counter/main/chatgpt-pro-counter.user.js
@@ -31,9 +31,9 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.2', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', errors: [] };
+    const state = { version: '1.1.3', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverEditors: 0, hoverMarkers: 0, errors: [] };
     diagnostics = {
-      state, open: null,
+      state, open: null, inspectHover: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
       fail(phase, error) {
         const names = ['Error', 'TypeError', 'ReferenceError', 'SyntaxError', 'RangeError', 'SecurityError', 'InvalidStateError', 'NotSupportedError', 'QuotaExceededError', 'AbortError'];
@@ -45,7 +45,8 @@
         try { console.error('[Pro Counter]', detail, error); } catch { /* diagnostic logging is optional */ }
       },
       show() {
-        const text = ['Pro 计数器启动诊断', `脚本版本: ${state.version}`, `启动阶段: ${state.phase}`, `页面检查: ${state.frame}`, `存储接口: ${state.storage}`, `界面状态: ${state.ui}`, `观察器: ${state.observer}`, `菜单接口: ${state.menu}`, `document.readyState: ${document.readyState}`, `近期错误: ${state.errors.length ? state.errors.join('\n') : '无'}`, '此报告不读取聊天内容、计数记录或 WebDAV 凭据。'].join('\n');
+        try { diagnostics.inspectHover?.(); } catch (error) { diagnostics.fail('hover-diagnostics', error); }
+        const text = ['Pro 计数器启动诊断', `脚本版本: ${state.version}`, `启动阶段: ${state.phase}`, `页面检查: ${state.frame}`, `存储接口: ${state.storage}`, `界面状态: ${state.ui}`, `观察器: ${state.observer}`, `菜单接口: ${state.menu}`, `悬停监听: ${state.hoverListeners}`, `可见输入框: ${state.hoverEditors}`, `可见模型标记: ${state.hoverMarkers}`, `最近悬停事件: ${state.hoverEvent}`, `最近控件匹配: ${state.hoverMatch}`, `最近输入框范围: ${state.hoverScope}`, `浮卡状态: ${state.hoverCard}`, `document.readyState: ${document.readyState}`, `近期错误: ${state.errors.length ? state.errors.join('\n') : '无'}`, '此报告不读取聊天内容、计数记录或 WebDAV 凭据。'].join('\n');
         try { if (typeof window.alert === 'function') window.alert(text); else console.info(text); } catch { /* retain the return value for diagnostics */ }
         return text;
       }
@@ -434,13 +435,17 @@
     target.replaceChildren(fragment);
   }
   function hoverPosition(rect, width, height, viewportWidth, viewportHeight) {
-    // Leave room immediately above the control for ChatGPT's own shortcut tooltip.
-    const gap = 62, edge = 12;
+    // The observed native shortcut tooltip is below the Pro button. Prefer
+    // above; if the viewport forces us below, leave a separate tooltip lane.
+    const edge = 12, aboveGap = 12, belowGap = 62;
+    const above = Math.max(0, rect.top - aboveGap - edge);
+    const below = Math.max(0, viewportHeight - rect.bottom - belowGap - edge);
+    const placement = height <= above || (height > below && above >= below) ? 'above' : 'below';
+    const maxHeight = placement === 'above' ? above : below;
+    const drawnHeight = Math.min(height, maxHeight);
     const left = Math.max(edge, Math.min(rect.left + rect.width / 2 - width / 2, viewportWidth - width - edge));
-    let top = rect.top - height - gap;
-    if (top < edge) top = rect.bottom + 12;
-    top = Math.max(edge, Math.min(top, viewportHeight - height - edge));
-    return { left, top };
+    const top = placement === 'above' ? rect.top - aboveGap - drawnHeight : rect.bottom + belowGap;
+    return { left, top: Math.max(edge, top), maxHeight, placement };
   }
   function boot() {
     diagnostics?.mark('frame-check');
@@ -679,7 +684,9 @@
       root?.querySelector('[data-action="collapse"]')?.focus();
     }
     const editorSelector = '#prompt-textarea,textarea[name="prompt-textarea"],[contenteditable="true"][data-placeholder],form textarea';
-    const controlSelector = 'button,[role="button"],[aria-haspopup],[data-testid="send-button"],[data-testid="composer-send-button"],[data-testid="composer-submit-button"],#composer-submit-button';
+    const composerSelector = 'form,[data-type="unified-composer"],[data-testid="composer"],[data-testid="conversation-composer"],#composer-background';
+    const modelMarkerSelector = '[data-codex-intelligence-trigger="true"],[data-composer-navigation-target="reasoning"]';
+    const controlSelector = 'button,[role="button"],[aria-haspopup],[data-testid="send-button"],[data-testid="composer-send-button"],[data-testid="composer-submit-button"],#composer-submit-button,[data-codex-intelligence-trigger="true"],[data-composer-navigation-target="reasoning"]';
     const excludedRegion = 'header,nav,aside,[role="menu"],[role="dialog"],[role="listbox"]';
     function visibleControl(el) {
       if (!el?.isConnected || el.closest('[hidden],[aria-hidden="true"],[inert]')) return false;
@@ -688,48 +695,81 @@
       try { const css = win.getComputedStyle(el); if (css.display === 'none' || css.visibility === 'hidden') return false; } catch { /* geometry remains available */ }
       return true;
     }
-    function composerFor(el) {
-      if (!el || el.closest(excludedRegion)) return null;
+    function composerFor(el, detail = {}) {
+      detail.scope = 'no-composer';
+      if (!el || el.closest(excludedRegion)) { detail.scope = 'excluded-region'; return null; }
       for (const editor of document.querySelectorAll(editorSelector)) {
         if (!visibleControl(editor) || editor.contains(el) || editor.closest(excludedRegion)) continue;
-        const explicit = editor.closest('form,[data-type="unified-composer"],[data-testid="composer"],[data-testid="conversation-composer"],#composer-background');
-        if (explicit) { if (explicit.contains(el)) return explicit; continue; }
-        // React's composer can be a plain div. Require a nearby shared ancestor;
-        // never accept a header/sidebar control merely because it is close on screen.
-        let ancestor = editor.parentElement;
-        for (let i = 0; ancestor && i < 5; i++, ancestor = ancestor.parentElement) {
+        // Inspect every recognized enclosing composer, not only the nearest
+        // form/background. A toolbar may be its sibling inside an outer shell.
+        const ancestors = [];
+        for (let ancestor = editor.parentElement; ancestor; ancestor = ancestor.parentElement) {
           if (ancestor === document.body || ancestor === document.documentElement || ancestor.matches('main,article,[role="main"]')) break;
-          if (ancestor.contains(el)) {
-            const input = editor.getBoundingClientRect(), rect = el.getBoundingClientRect();
-            if (rect.top >= input.top - 100 && rect.bottom <= input.bottom + 160 && rect.left >= input.left - 24 && rect.right <= input.right + 180) return ancestor;
-            break;
-          }
+          ancestors.push(ancestor);
+          if (ancestor.matches(composerSelector) && ancestor.contains(el)) { detail.scope = 'explicit-composer'; return ancestor; }
+        }
+        // Plain-div shells also occur around a nested editor form. Keep this
+        // fallback nearby, bounded, and out of a different composer's controls.
+        const ownComposer = el.closest(composerSelector);
+        if (ownComposer && !ownComposer.contains(editor)) continue;
+        for (const ancestor of ancestors.slice(0, 8)) {
+          if (!ancestor.contains(el)) continue;
+          const input = editor.getBoundingClientRect(), rect = el.getBoundingClientRect();
+          if (rect.top >= input.top - 100 && rect.bottom <= input.bottom + 160 && rect.left >= input.left - 24 && rect.right <= input.right + 180) { detail.scope = 'nearby-composer'; return ancestor; }
+          break;
         }
       }
       return null;
     }
-    function nativeTrigger(target) {
-      if (!target || typeof target.closest !== 'function' || host?.contains(target) || hoverHost?.contains(target) || incrementHost?.contains(target)) return null;
+    function controlText(el) {
+      // Measurement/accessibility duplicates are not the visible model label.
+      // Read only a bounded control subtree; never retain DOM/text in diagnostics.
+      let text = '', visited = 0;
+      const visit = node => {
+        if (++visited > 160 || text.length >= 256) return;
+        if (node.nodeType === 3) { text += (node.data || '').slice(0, 256 - text.length); return; }
+        if (node.nodeType !== 1 || node.matches('[hidden],[aria-hidden="true"],[inert],svg,script,style,[contenteditable="true"],textarea')) return;
+        try { const css = win.getComputedStyle(node); if (css.display === 'none' || css.visibility === 'hidden') return; } catch { /* semantic visibility is still available */ }
+        for (const child of node.childNodes || []) visit(child);
+      };
+      visit(el);
+      return text.replace(/\s+/g, ' ').trim();
+    }
+    function nativeTrigger(target, report = false) {
+      const detail = { match: 'no-control', scope: 'unchecked' };
+      const finish = el => {
+        if (report && diagnostics) { diagnostics.state.hoverMatch = detail.match; diagnostics.state.hoverScope = detail.scope; }
+        return el;
+      };
+      if (!target || typeof target.closest !== 'function' || host?.contains(target) || hoverHost?.contains(target) || incrementHost?.contains(target)) return finish(null);
       const candidates = [];
       let control = target.closest(controlSelector);
       for (let i = 0; control && i < 4; i++, control = control.parentElement?.closest(controlSelector)) candidates.push(control);
-      // Some composer versions render Pro + chevron as clickable div/span content.
-      // Walk from an SVG/path or text wrapper without changing the native hitbox.
+      // SVG/use events retarget to the entire native button, without annotation
+      // or hitbox changes. Keep the unmarked Pro-dropdown fallback for old UIs.
       if (!candidates.length) for (let node = target, i = 0; node && i < 4; node = node.parentElement, i++) {
-        if (/^Pro(?:\s*[⌄⌃▾▿∨])?$/i.test((node.textContent || '').trim())) candidates.push(node);
+        if (/^Pro(?:\s*[⌄⌃▾▿∨])?$/i.test(controlText(node))) candidates.push(node);
       }
       for (const el of candidates) {
-        if (!visibleControl(el) || !composerFor(el)) continue;
-        const text = (el.textContent || '').trim();
+        if (!visibleControl(el)) { detail.match = 'not-visible'; continue; }
+        if (!composerFor(el, detail)) { detail.match = 'outside-composer'; continue; }
+        const text = controlText(el);
         const label = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid'), text].filter(Boolean).join(' ').trim();
-        if (/voice|microphone|(?:^|\W)mic(?:\W|$)|speech|audio|dictat|stop|pause|record|语音|語音|麦克风|麥克風|听写|聽寫|录音|錄音|朗读|朗讀|停止|暂停|暫停|upgrade|subscribe|升级|升級/i.test(label)) return null;
+        if (/voice|microphone|(?:^|\W)mic(?:\W|$)|speech|audio|dictat|stop|pause|record|语音|語音|麦克风|麥克風|听写|聽寫|录音|錄音|朗读|朗讀|停止|暂停|暫停|upgrade|subscribe|升级|升級/i.test(label)) { detail.match = 'excluded-control'; return finish(null); }
         const testId = el.getAttribute('data-testid') || '';
         const send = /^(?:send-button|composer-send-button|composer-submit-button)$/.test(testId) || el.id === 'composer-submit-button' || el.getAttribute('type') === 'submit' || /^(?:send(?: message| prompt)?|submit(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)(?:[\s(（]|$)/i.test(label);
-        const pro = /(?:^|\s)Pro(?:\s|$)|思考强度|思考強度|思考時間|Thinking|reasoning[- ]?effort|thinking[- ]?(?:level|effort|time)/i.test(label);
-        if (send || pro) return el;
+        const modelMarker = el.getAttribute('data-composer-navigation-target') === 'reasoning' || el.getAttribute('data-codex-intelligence-trigger') === 'true';
+        const pro = /\bPro\b|思考强度|思考強度|思考時間|Thinking|reasoning[- ]?effort|thinking[- ]?(?:level|effort|time)/i.test(label);
+        if (send || modelMarker || pro) { detail.match = send ? 'send-control' : modelMarker ? 'model-marker' : 'model-label'; return finish(el); }
+        detail.match = 'unrecognized-control';
       }
-      return null;
+      return finish(null);
     }
+    if (diagnostics) diagnostics.inspectHover = () => {
+      diagnostics.state.hoverEditors = [...document.querySelectorAll(editorSelector)].filter(el => visibleControl(el) && !el.closest(excludedRegion)).length;
+      diagnostics.state.hoverMarkers = [...document.querySelectorAll(modelMarkerSelector)].filter(el => visibleControl(el) && composerFor(el)).length;
+      // Counts and fixed reason labels only: no URLs, attributes, chat text or DOM.
+    };
     function showIncrement(key) {
       clearTimeout(incrementTimer); incrementHost?.remove();
       const anchor = visibleControl(lastNativeAnchor) && composerFor(lastNativeAnchor) ? lastNativeAnchor : [...document.querySelectorAll(controlSelector)].find(el => nativeTrigger(el));
@@ -746,7 +786,7 @@
       incrementTimer = setTimeout(() => { if (incrementHost === next) clearIncrement(); flushIncrement(); }, 1100);
     }
     function updateHover() {
-      if (!hoverRoot || !activeTrigger || !collapsed || !nativeTrigger(activeTrigger)) { if (hoverHost) hoverHost.hidden = true; return; }
+      if (!hoverRoot || !activeTrigger || !collapsed || !nativeTrigger(activeTrigger)) { if (hoverHost) hoverHost.hidden = true; if (diagnostics) diagnostics.state.hoverCard = 'hidden'; return; }
       const hadFocus = !!hoverRoot.activeElement;
       const total = summarize(records, settings);
       renderMarkup(hoverRoot, `<style>${style}</style><section class="hover-card" aria-label="Pro 用量，本机估算"><div class="hover-title"><span class="pro-label">✦ Pro</span><span>${settings.mode === 'fixed' ? '本周期' : '最近七天'} · 本机估算</span></div><div class="number">${total.remaining}<span> 次剩余</span></div><div class="meter" aria-hidden="true"><div class="fill" style="width:${Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="hover-footer"><span>已用 ${total.used} / ${settings.cap}</span><button type="button" data-action="manage">管理用量 ↗</button></div>${storageError ? '<div class="hover-error">存储异常，请打开计数器检查</div>' : ''}</section>`);
@@ -757,25 +797,26 @@
       if (!activeTrigger || !hoverHost || hoverHost.hidden) return;
       if (!nativeTrigger(activeTrigger)) { hideHover(); return; }
       const rect = activeTrigger.getBoundingClientRect();
-      const available = Math.max(rect.top - 74, win.innerHeight - rect.bottom - 24);
-      if (available < 56) { hideHover(); return; }
       const card = hoverRoot.querySelector('.hover-card');
-      if (card) card.style.maxHeight = `${available}px`;
+      if (card) card.style.maxHeight = 'calc(100dvh - 24px)';
       const size = hoverHost.getBoundingClientRect();
       const pos = hoverPosition(rect, size.width || 266, size.height || 148, win.innerWidth, win.innerHeight);
+      if (pos.maxHeight < 56) { hideHover(); if (diagnostics) diagnostics.state.hoverCard = 'no-viewport-space'; return; }
+      if (card) card.style.maxHeight = `${pos.maxHeight}px`;
       hoverHost.style.left = `${pos.left}px`; hoverHost.style.top = `${pos.top}px`;
+      if (diagnostics) diagnostics.state.hoverCard = `visible-${pos.placement}`;
     }
     function showHover(el) {
       clearTimeout(hoverHideTimer); clearTimeout(hoverTimer);
       if (!collapsed) return;
       activeTrigger = el; lastNativeAnchor = el; hoverTimer = setTimeout(() => { load(); updateHover(); }, 100);
     }
-    function hideHover() { clearTimeout(hoverTimer); clearTimeout(hoverHideTimer); activeTrigger = null; if (hoverHost) hoverHost.hidden = true; }
+    function hideHover() { clearTimeout(hoverTimer); clearTimeout(hoverHideTimer); activeTrigger = null; if (hoverHost) hoverHost.hidden = true; if (diagnostics) diagnostics.state.hoverCard = 'hidden'; }
     function queueHide() { clearTimeout(hoverHideTimer); hoverHideTimer = setTimeout(hideHover, 280); }
     function setupHover() {
-      document.addEventListener('pointerover', event => { const el = nativeTrigger(event.target); if (el && el !== activeTrigger) showHover(el); else if (el) clearTimeout(hoverHideTimer); }, true);
+      document.addEventListener('pointerover', event => { if (diagnostics) diagnostics.state.hoverEvent = 'pointerover'; const el = nativeTrigger(event.target, true); if (el && el !== activeTrigger) showHover(el); else if (el) clearTimeout(hoverHideTimer); }, true);
       document.addEventListener('pointerout', event => { if (activeTrigger && activeTrigger.contains(event.target) && !activeTrigger.contains(event.relatedTarget)) queueHide(); }, true);
-      document.addEventListener('focusin', event => { const el = nativeTrigger(event.target); if (el) showHover(el); }, true);
+      document.addEventListener('focusin', event => { if (diagnostics) diagnostics.state.hoverEvent = 'focusin'; const el = nativeTrigger(event.target, true); if (el) showHover(el); }, true);
       document.addEventListener('focusout', event => { if (activeTrigger?.contains(event.target)) queueHide(); }, true);
       hoverHost.addEventListener('pointerenter', () => clearTimeout(hoverHideTimer));
       hoverHost.addEventListener('pointerleave', queueHide);
@@ -790,6 +831,7 @@
       });
       win.addEventListener('resize', positionHover, { passive: true });
       win.addEventListener('scroll', positionHover, { passive: true, capture: true });
+      if (diagnostics) diagnostics.state.hoverListeners = 'installed';
     }
     function theme() {
       if (!host) return;

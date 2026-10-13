@@ -15,7 +15,7 @@ test('release preserves script identity and persistent v1 storage namespace', ()
 });
 
 test('release uses versioned GitHub update and install metadata', () => {
-  assert.deepEqual(values('version'), ['1.1.2']);
+  assert.deepEqual(values('version'), ['1.1.3']);
   assert.deepEqual(values('updateURL'), [raw]);
   assert.deepEqual(values('downloadURL'), [raw]);
   assert.deepEqual(values('homepageURL'), ['https://github.com/YuSaZh/GPT-Pro-Counter']);
