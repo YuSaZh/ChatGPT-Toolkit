@@ -1,13 +1,13 @@
 # ChatGPT Toolkit 验证记录
 
-版本：1.1.7（实验预览）  
+版本：1.1.8（实验预览）  
 日期：2026-10-13  
 运行时：Node.js v24.19.0
 
 ## 已通过
 
 - `node --check chatgpt-pro-counter.user.js`：语法检查通过。
-- `node --test *.test.cjs`：226 项测试全部通过，无跳过。
+- `node --test *.test.cjs`：261 项测试全部通过，无跳过。
 - 发布元信息测试：版本号、GitHub 下载 / 更新链接、脚本身份和存储命名空间。
 - 合成请求测试：模型分类、周期边界、去重、失败 / 取消、流读取边界与原请求语义。
 - 存储与 WebDAV 测试：导入校验、凭据排除、条件写入、冲突合并、取消和存储失败保护。
@@ -71,9 +71,21 @@
 
 - `ui-v117-smoke.cjs` 提供品牌标题、248px 悬浮卡、320 / 272 / 240 / 180px 窄屏、100 万上限与超额用量、图片 0 / 大整数 / 过期标签、深色及矮窗口“管理用量”可达性的合成浏览器流程。语法检查通过；本次唯一启动尝试因 Chromium `socket() failed: Operation not permitted` 退出，未进入页面断言，不计为通过。
 
+## 1.1.8 新增验证
+
+- 保留原有 226 项测试；新增 27 项独立 adversarial 审查和 8 项实现侧 UI 回归，共 261 项 Node 测试全通过，无跳过。主脚本与每个 `.cjs` 均通过 `node --check`。
+- PoW 覆盖同源 / 路径 / 方法限制，prepare 与旧端点，拒绝 finalize，前导零及大小写保留、真实布尔 required / 未知、缺失 / 非法 / 超大 / 非 JSON / 重定向响应、原 Promise / Response / this / args / AbortSignal、clone 失败 / 取消、异步及同步重入失效竞态；RAM 快照不进入存储、导出或 WebDAV。
+- 身份只接受自己的同源 `GET /api/auth/session` 响应的 `user.id`，拒绝其他来源 / 路由 / ID 形态。默认关闭时不克隆身份响应。测试覆盖会话响应倒序、迟到哈希、登出、模式启停、无效身份、可选显示助手失败及原生 fetch 语义；没有读取邮箱 / 令牌作为身份或持久化原始 ID。
+- 发送时同步捕获不可变账本上下文。已发出的 A 请求、同步原生重入和后续 B 会话不使请求改记 B；未知请求始终留在随机未分配账本。两份真正启动的合成页面共享同一个 GM store，分别识别 A / B，另一标签页 / 最新共享设置 / WebDAV 的账本选择均不覆盖本页有效账号。
+- WebDAV 合并两端记录后、序列化 / PUT 前过滤所有未分配记录；本机旧未分配记录保留、远端未分配记录不导入。合成 GET / 条件 PUT 验证远端 B 的共享设置可合并，但新的本页请求仍归 A；不发送原始 ID / 邮箱 / 令牌或本地开关。
+- UI 覆盖默认关闭、无额外查询、等待身份、保留旧历史、散列 ID、记录 / 上限共用说明、显式未分配提示和查看入口、不自动搬移、待识别禁校准、不播放入账 +1、过期校准表单拒绝、失焦 / 导航 / 输入区外交互清空、隐藏页不进入持续重绘循环、工具自身控件不清空身份，以及 PoW 顶部文案与清除。
+- 审查发现并修复两个竞态 / 合并边界：PoW / 图片的代次须在原生 fetch 前保留，避免同步重入后旧回包取得新代次；WebDAV 须同时过滤远端已有未分配记录，不能只过滤本机列表。修复后全量重跑通过。
+- `ui-v118-smoke.cjs` 提供合成真实浏览器的开关 / 会话 / PoW、180–900px 窄屏、深色主题和无额外流量流程。语法通过；本次唯一 Chromium 启动因 `socket() failed: Operation not permitted` 退出，未运行任何页面断言。没有尝试绕过权限限制，也没有将此阶段计为通过。
+- 自动分账明确标为实验功能。没有实测当前网页账号切换信号，故使用保守失效边界；可能长期显示待识别，直到网页自然返回新会话。合成测试只能证明这些已实现的状态边界，不能证明当前真实页面会在需要时提供身份，不能保证即时 / 无缝账号切换。
+
 ## 未完成 / 受阻
 
-- Playwright / Chromium 合成浏览器测试：1.1.7 的 `ui-v117-smoke.cjs` 和此前 1.1.6 / 1.1.5 的启动均受 socket 权限限制，未进入页面断言；其余浏览器测试没有在本版重跑。没有将此阶段标为通过。
+- Playwright / Chromium 合成浏览器测试：1.1.8 的 `ui-v118-smoke.cjs`、1.1.7 的 `ui-v117-smoke.cjs` 和此前 1.1.6 / 1.1.5 的启动均受 socket 权限限制，未进入页面断言；其余浏览器测试没有在本版重跑。没有将此阶段标为通过。
 - 真实 Tampermonkey 扩展注入：未验证。
 - 真实 ChatGPT 账号与当前网页交互：未验证；已有用户提供的按钮片段与截图，但外围 DOM、脚本注入及交互结果仍需在用户环境确认。
 - 真实 WebDAV 服务：未验证。测试使用模拟响应和明确的假凭据。
@@ -87,10 +99,10 @@ node --check chatgpt-pro-counter.user.js
 node --test *.test.cjs
 ```
 
-如机器已安装 Playwright 和 Chromium，可另外运行 `node ui-smoke.cjs`、`node audit-bootstrap.cjs`、`node ui-send-smoke.cjs`、`node ui-v116-smoke.cjs`、`node ui-v117-smoke.cjs`。这些脚本默认使用 `/usr/bin/chromium`；不同系统可修改脚本中的浏览器路径。它们仍是合成页面测试，不能替代实际扩展与 ChatGPT 页面验收。
+如机器已安装 Playwright 和 Chromium，可另外运行 `node ui-smoke.cjs`、`node audit-bootstrap.cjs`、`node ui-send-smoke.cjs`、`node ui-v116-smoke.cjs`、`node ui-v117-smoke.cjs`、`node ui-v118-smoke.cjs`。这些脚本默认使用 `/usr/bin/chromium`；不同系统可修改脚本中的浏览器路径。它们仍是合成页面测试，不能替代实际扩展与 ChatGPT 页面验收。
 
 本版脚本 SHA-256：
 
 ```text
-8f38f537e0d88ca31e305378b94878b8059c5eed4afaa78fa696223674d533c5
+1b6ba0a9924632cb94d85262e90c7f15694427533eff2e86e7257bc305b79a4b
 ```
