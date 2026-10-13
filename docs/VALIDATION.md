@@ -1,13 +1,13 @@
 # 验证记录
 
-版本：1.1.5（实验预览）  
+版本：1.1.6（实验预览）  
 日期：2026-10-13  
 运行时：Node.js v24.19.0
 
 ## 已通过
 
 - `node --check chatgpt-pro-counter.user.js`：语法检查通过。
-- `node --test *.test.cjs`：194 项测试全部通过，无跳过。
+- `node --test *.test.cjs`：217 项测试全部通过，无跳过。
 - 发布元信息测试：版本号、GitHub 下载 / 更新链接、脚本身份和存储命名空间。
 - 合成请求测试：模型分类、周期边界、去重、失败 / 取消、流读取边界与原请求语义。
 - 存储与 WebDAV 测试：导入校验、凭据排除、条件写入、冲突合并、取消和存储失败保护。
@@ -52,9 +52,18 @@
 - 旧回归的预期和夹具已按“当前选中 Pro”更新，没有向全局 DOM 夹具添加默认 Pro，从而保留未知模型的失败关闭测试。面板外部收起、草稿与 +1 动效回归全部重跑通过。
 - `node --check` 对主脚本与所有 `.cjs` 文件均通过。`ui-send-smoke.cjs` 已添加同区 Pro 选择器；本次普通和经批准的提高权限 Chromium 启动均因 socket 权限退出，没有运行页面断言。
 
+## 1.1.6 新增验证
+
+- 23 项独立回归覆盖本机显示偏好：缺失 / 非法值默认仅 Pro，所有模型模式下的直接 pointerenter / mouseenter / focus、委托 SVG pointerover / focusin、刷新重载、另一标签页重新读取、模型变化、SPA 替换、已显示浮卡切回仅 Pro 立即关闭、存储写入失败保留原选项。
+- 确认切换不重建 / 提交周期表单，外部关闭重开保留草稿；不会更改账本 / 记录。导入、导出、备份与 WebDAV v1 数据格式继续排除这个本机界面偏好，旧版远端设置不会覆盖它。
+- 合成测试覆盖 310px 宽度与紧凑校准布局、较小且显式的控件字体、完整操作入口、ARIA 选中状态与焦点样式；小于 300px 的视口把初始用量按钮移到第二行。CSS 断言不等于像素视觉验收。
+- 原有 194 项测试全部重新通过，总计 217 项、无跳过；新增测试确认切换和悬停不主动联网，实际 Pro 记账仍由请求 / 响应模型决定。
+- 与已发布 1.1.5 的源码比较：统计与校准核心、网络观察、图片额度解析 / 生命周期、导入与 WebDAV 算法逐字未改；新增字段只在 UI 启动层读取 / 保存。
+- `ui-v116-smoke.cjs` 提供实际浏览器的字号 / 310px 面板 / 56px 校准按钮 / 320px 与 240px 窄屏 / 主题 / 键盘 / 草稿验证流程，已通过语法检查。浏览器阶段未运行成功：`ui-send-smoke.cjs` 在本次 Chromium 启动时仍因 `socket() failed: Operation not permitted` 退出；cloud browser 的 URL 安全策略也拒绝本地 file 页面，未尝试绕过该限制。
+
 ## 未完成 / 受阻
 
-- Playwright / Chromium 合成浏览器测试：1.1.5 本次运行 `node ui-send-smoke.cjs`，常规和经批准的提高权限启动均因 `socket() failed: Operation not permitted` 退出，尚未进入页面测试；后续串行的 `ui-smoke.cjs` 和 `audit-bootstrap.cjs` 也未执行。没有将此阶段标为通过。
+- Playwright / Chromium 合成浏览器测试：本次 1.1.6 普通启动及此前 1.1.5 经批准的提高权限启动 `node ui-send-smoke.cjs` 均因 `socket() failed: Operation not permitted` 退出，尚未进入页面测试；后续串行的 `ui-smoke.cjs` 和 `audit-bootstrap.cjs` 也未执行。没有将此阶段标为通过。
 - 真实 Tampermonkey 扩展注入：未验证。
 - 真实 ChatGPT 账号与当前网页交互：未验证；已有用户提供的按钮片段与截图，但外围 DOM、脚本注入及交互结果仍需在用户环境确认。
 - 真实 WebDAV 服务：未验证。测试使用模拟响应和明确的假凭据。
@@ -68,10 +77,10 @@ node --check chatgpt-pro-counter.user.js
 node --test *.test.cjs
 ```
 
-如机器已安装 Playwright 和 Chromium，可另外运行 `node ui-smoke.cjs`、`node audit-bootstrap.cjs`、`node ui-send-smoke.cjs`。这些脚本默认使用 `/usr/bin/chromium`；不同系统可修改脚本中的浏览器路径。它们仍是合成页面测试，不能替代实际扩展与 ChatGPT 页面验收。
+如机器已安装 Playwright 和 Chromium，可另外运行 `node ui-smoke.cjs`、`node audit-bootstrap.cjs`、`node ui-send-smoke.cjs`、`node ui-v116-smoke.cjs`。这些脚本默认使用 `/usr/bin/chromium`；不同系统可修改脚本中的浏览器路径。它们仍是合成页面测试，不能替代实际扩展与 ChatGPT 页面验收。
 
 本版脚本 SHA-256：
 
 ```text
-18191791a335742acec3188a6542975357b041c0f1cd5840c32b305bf7f025c1
+6e3274f21c8d986907a5b28e90c5cda114d79c76fc7db2c751b50eab97f54f4c
 ```
