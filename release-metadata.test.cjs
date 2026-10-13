@@ -8,14 +8,14 @@ const header = source.match(/^\/\/ ==UserScript==\n([\s\S]*?)\/\/ ==\/UserScript
 const values = key => [...header.matchAll(new RegExp('^// @' + key + '\\s+(.+)$', 'gm'))].map(match => match[1].trim());
 const raw = 'https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js';
 
-test('release preserves script identity and persistent v1 storage namespace', () => {
-  assert.deepEqual(values('name'), ['ChatGPT Pro 本机计数器']);
+test('release uses Toolkit name and preserves persistent v1 storage namespace', () => {
+  assert.deepEqual(values('name'), ['ChatGPT Toolkit']);
   assert.deepEqual(values('namespace'), ['local.chatgpt.pro-counter']);
   assert.equal(require('./chatgpt-pro-counter.user.js').PREFIX, 'gpc.v1.');
 });
 
 test('release uses versioned GitHub update and install metadata', () => {
-  assert.deepEqual(values('version'), ['1.1.8']);
+  assert.deepEqual(values('version'), ['1.1.9']);
   assert.deepEqual(values('updateURL'), [raw]);
   assert.deepEqual(values('downloadURL'), [raw]);
   assert.deepEqual(values('homepageURL'), ['https://github.com/YuSaZh/ChatGPT-Toolkit']);
@@ -35,3 +35,4 @@ test('installation documentation points at the published raw script', () => {
     assert.doesNotMatch(text, /待上传|安装入口待上线/);
   }
 });
+

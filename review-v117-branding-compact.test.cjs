@@ -24,9 +24,9 @@ function setup(options = {}) {
   return { ...e, model, send, hover, show, click };
 }
 
-test('v117: rebrand preserves original userscript identity, namespace and data format', () => {
-  assert.equal(meta('name'), 'ChatGPT Pro 本机计数器'); assert.equal(meta('namespace'), 'local.chatgpt.pro-counter');
-  assert.equal(api.PREFIX, 'gpc.v1.'); assert.equal(meta('version'), '1.1.8');
+test('v119: requested rename preserves namespace and data format', () => {
+  assert.equal(meta('name'), 'ChatGPT Toolkit'); assert.equal(meta('namespace'), 'local.chatgpt.pro-counter');
+  assert.equal(api.PREFIX, 'gpc.v1.'); assert.equal(meta('version'), '1.1.9');
   const data = api.snapshot(api.defaultSettings(), []);
   assert.equal(data.format, 'chatgpt-pro-counter'); assert.equal(data.version, 1);
   assert.ok(fs.existsSync(path.join(__dirname, 'chatgpt-pro-counter.user.js')));
@@ -101,3 +101,4 @@ test('v117: installation documentation brands Toolkit while explaining upgrade i
     assert.doesNotMatch(text, /counter_compact|CleanShot 2026|\/workspace\/scratch|截屏2026/);
   }
 });
+
