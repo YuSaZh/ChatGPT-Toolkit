@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Pro 本机计数器
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.1
+// @version      1.1.2
 // @homepageURL  https://github.com/YuSaZh/GPT-Pro-Counter
 // @supportURL   https://github.com/YuSaZh/GPT-Pro-Counter/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/GPT-Pro-Counter/main/chatgpt-pro-counter.user.js
@@ -31,7 +31,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.1', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', errors: [] };
+    const state = { version: '1.1.2', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', errors: [] };
     diagnostics = {
       state, open: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -454,8 +454,13 @@
     const gmSet = hasStorage ? GM_setValue : (key, value) => volatile.set(key, value);
     const gmKeys = hasStorage ? GM_listValues : () => [...volatile.keys()];
     let settings = defaultSettings(), records = [], root, host, hoverRoot, hoverHost, activeTrigger, collapsed = true, tab = 'home', notice = '', storageError = hasStorage ? '' : 'Tampermonkey 存储权限未就绪：当前仅临时显示，刷新后不会保留。请检查脚本权限再刷新。', observer;
-    let hoverTimer, hoverHideTimer, panelReturnFocus, storageAvailable = hasStorage, uiBound = false, uiReady = false;
+    let hoverTimer, hoverHideTimer, panelReturnFocus, lastNativeAnchor, incrementHost, incrementTimer, incrementKey, storageAvailable = hasStorage, uiBound = false, uiReady = false;
     let refreshTimer, lastKeys = '', settingsSnapshot = '', syncBusy = false, syncStatus = '未启用 WebDAV', lastSyncAttempt = 0, configEpoch = 0, currentAbort = null;
+    // UI-only state; never persisted or included in backups/sync.
+    const knownCountKeys = new Set(), queuedIncrements = new Map();
+    const countKey = event => JSON.stringify([event.ledger, event.key]);
+    const isProCount = event => event.state === 'accepted' && kindFor(event) === 'pro';
+    const rememberCount = event => { if (isProCount(event)) knownCountKeys.add(countKey(event)); };
     const getDav = () => {
       const empty = { url: '', username: '', password: '', interval: 0, enabled: false, tested: false, approved: false };
       try { const value = gmGet(`${PREFIX}webdav`, empty); return value && typeof value === 'object' ? value : empty; }
@@ -468,6 +473,7 @@
         if (allSettings.length) settings = allSettings.sort((a, b) => b.updated - a.updated || b.id.localeCompare(a.id))[0];
         else { settings = { ...settings, id: 'initial', updated: 0 }; gmSet(`${PREFIX}settings.initial`, settings); }
         records = keys.filter(k => k.startsWith(`${PREFIX}event.`)).map(k => { try { return validEvent(gmGet(k)); } catch { return null; } }).filter(Boolean);
+        records.forEach(rememberCount);
         lastKeys = keys.length + ':' + records.reduce((n, e) => n + e.updated, 0);
       } catch { storageAvailable = false; storageError = '本机存储不可用，当前计数可能未保存。请先导出并检查 Tampermonkey 权限。'; }
     };
@@ -475,9 +481,43 @@
       try {
         const clean = validEvent(event); gmSet(`${PREFIX}event.${clean.id}`, clean);
         const index = records.findIndex(e => e.id === clean.id); if (index < 0) records.push(clean); else records[index] = clean;
+        rememberCount(clean);
       } catch { storageAvailable = false; storageError = '记录写入失败，请导出备份并检查脚本存储。'; if (strict) throw Error(storageError); }
       scheduleRender();
     };
+    function saveObserved(event) {
+      // Only this tab's observer may create an animation. Imports, calibration,
+      // storage refresh and WebDAV use save/load directly.
+      load();
+      const key = countKey(event), known = knownCountKeys.has(key), before = summarize(records, settings);
+      save(event);
+      const after = summarize(records, settings);
+      const included = after.rows.some(row => countKey(row) === key && isProCount(row));
+      if (!known && isProCount(event) && included && after.pro > before.pro) queuedIncrements.set(key, true);
+      // A later stream error can undo HTTP acceptance. Remove queued or visible
+      // feedback immediately when the group no longer contributes to the count.
+      if (!included) {
+        // If a provisional count failed before any paint, a later successful
+        // retry still deserves its first visible +1. Already shown or imported
+        // groups never enter this queue and remain deduplicated.
+        if (queuedIncrements.has(key)) knownCountKeys.delete(key);
+        queuedIncrements.delete(key);
+        if (incrementKey === key) clearIncrement();
+      }
+    }
+    function clearIncrement() {
+      clearTimeout(incrementTimer); incrementHost?.remove(); incrementHost = null; incrementKey = null;
+    }
+    function flushIncrement() {
+      if (incrementHost) return;
+      const current = new Set(summarize(records, settings).rows.filter(isProCount).map(countKey));
+      for (const [key] of queuedIncrements) {
+        queuedIncrements.delete(key);
+        if (!current.has(key)) continue;
+        try { showIncrement(key); } catch (error) { diagnostics?.fail('count-animation', error); }
+        break;
+      }
+    }
     const exportObject = () => ({ format: 'chatgpt-pro-counter', version: 1, exportedAt: new Date().toISOString(), settings, events: records });
     const backup = reason => {
       load();
@@ -488,7 +528,7 @@
       const url = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' }));
       const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
     };
-    function scheduleRender() { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { updateHover(); if (root && (collapsed || !['settings', 'sync'].includes(tab))) render(); }, 150); }
+    function scheduleRender() { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { updateHover(); if (root && (collapsed || !['settings', 'sync'].includes(tab))) render(); flushIncrement(); }, 150); }
     const fmt = ms => new Date(ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
     const esc = str => String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const button = (action, label, klass = '') => `<button type="button" data-action="${action}" class="${klass}">${label}</button>`;
@@ -506,7 +546,8 @@
       :host([data-dark]){--bg:#202329;--fg:#f0f2f5;--muted:#aab2bf;--line:#3a4049;--soft:#2a2e35;--accent:#bca7ff;--accent-bg:#34294d;--warn:#f4c078;--shadow:0 12px 45px #0007}
       *{box-sizing:border-box}button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:7px 11px;border-radius:10px}button:hover{background:var(--soft)}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #ac8df9;outline-offset:2px}button.primary{background:var(--accent-bg);color:var(--accent);border-color:transparent;font-weight:650}button.ghost{border:none;background:transparent;padding:4px 7px;color:var(--muted)}
       .panel{width:min(356px,calc(100vw - 24px));max-height:calc(100dvh - 94px);overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow)}header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 8px}h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.1px}h1 span{font-size:10px;color:var(--accent);background:var(--accent-bg);padding:3px 6px;margin-left:6px;border-radius:5px;vertical-align:middle}.body{padding:8px 18px 18px}.muted,small{color:var(--muted)}small{font-size:11px}.eyebrow{color:var(--muted);font-size:12px}.number{font-size:42px;letter-spacing:-1.5px;font-weight:700;line-height:1.25;margin-top:5px}.number span{font-size:17px;letter-spacing:0;color:var(--muted);font-weight:400}.meter{height:7px;border-radius:9px;background:var(--soft);overflow:hidden;margin:12px 0}.fill{height:100%;background:linear-gradient(90deg,#3e4ee9,#9766f7,#c995ff);border-radius:9px}.row{display:flex;align-items:center;justify-content:space-between;gap:8px}.meta{font-size:12px;color:var(--muted)}.callout{font-size:11px;color:var(--muted);background:var(--soft);padding:10px 11px;border-radius:10px;margin:12px 0}.warning{color:var(--warn)}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.foot{border-top:1px solid var(--line);padding-top:11px;margin-top:12px;font-size:10px;color:var(--muted)}.chip{padding:9px 13px;border-radius:30px;box-shadow:0 3px 20px #31245c18;font-size:12px;display:flex;align-items:center;gap:4px}.chip strong{color:var(--accent);margin:0 5px}nav{display:flex;gap:5px;padding:0 18px 6px}nav button{font-size:12px;border:none;padding:5px 8px}nav button.active{background:var(--accent-bg);color:var(--accent)}label{display:block;font-size:12px;margin:12px 0 4px}input,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--fg)}.log{list-style:none;margin:0;padding:0}.log li{padding:10px 0;border-bottom:1px solid var(--line)}.log .model{font-size:11px;word-break:break-all;margin-top:3px}.badge{font-size:10px}.empty{padding:25px 0;text-align:center;color:var(--muted)}p{margin:7px 0}.notice{margin:0 18px 8px;padding:8px;background:var(--accent-bg);color:var(--accent);font-size:11px;border-radius:8px} .error{background:var(--soft);color:var(--warn)}
-      .launcher{display:flex;justify-content:flex-end;margin-top:10px}.chip:before{content:'✦';color:var(--accent);font-size:15px;margin-right:3px}.chip small{font-size:10px}.hover-card{width:266px;padding:16px 18px;background:var(--bg);border:1px solid var(--line);border-radius:20px;box-shadow:0 12px 42px #35245c24;color:var(--fg)}.hover-title{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}.pro-label{font-weight:650;letter-spacing:.2px;color:var(--accent)}.hover-card .number{font-size:34px;line-height:1.2;margin:8px 0 0}.hover-card .number span{font-size:16px}.hover-card .meter{margin:10px 0;height:5px}.hover-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted)}.hover-footer button{font-size:11px;color:var(--accent);border:none;background:transparent;padding:3px 0}.hover-error{font-size:11px;color:var(--warn);margin-top:8px}.panel{animation:appear .16s ease-out}.close{font-size:18px;line-height:1}.chip strong{font-variant-numeric:tabular-nums}.number{font-variant-numeric:tabular-nums}.fill{transition:width .22s ease}@keyframes appear{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@media(max-width:460px){.hover-card{width:min(266px,calc(100vw - 24px))}.panel{border-radius:18px}}
+      .count-increment{display:grid;place-items:center;min-width:44px;height:32px;border:1px solid var(--line);border-radius:18px;background:var(--accent-bg);color:var(--accent);font-size:19px;font-weight:750;box-shadow:var(--shadow);animation:count-rise 1.1s ease-out both;pointer-events:none}@keyframes count-rise{0%{opacity:0;transform:translateY(8px) scale(.88)}20%,65%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-16px) scale(1)}}
+      .launcher{display:flex;justify-content:flex-end;margin-top:10px}.chip:before{content:'✦';color:var(--accent);font-size:15px;margin-right:3px}.chip small{font-size:10px}.hover-card{width:min(266px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:16px 18px;background:var(--bg);border:1px solid var(--line);border-radius:20px;box-shadow:0 12px 42px #35245c24;color:var(--fg)}.hover-title{gap:8px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}.pro-label{font-weight:650;letter-spacing:.2px;color:var(--accent)}.hover-card .number{font-size:34px;line-height:1.2;margin:8px 0 0}.hover-card .number span{font-size:16px}.hover-card .meter{margin:10px 0;height:5px}.hover-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted)}.hover-footer button{font-size:11px;color:var(--accent);border:none;background:transparent;padding:3px 0}.hover-error{font-size:11px;color:var(--warn);margin-top:8px}.panel{animation:appear .16s ease-out}.close{font-size:18px;line-height:1}.chip strong{font-variant-numeric:tabular-nums}.number{font-variant-numeric:tabular-nums}.fill{transition:width .22s ease}@keyframes appear{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@media(max-width:460px){.hover-card{width:min(266px,calc(100vw - 24px))}.panel{border-radius:18px}}
     `;
     function launcher(total) { return `<div class="launcher"><button type="button" data-action="expand" class="chip" aria-label="打开 Pro 计数器；本机估算 ${total.used}/${settings.cap}" aria-expanded="${!collapsed}" aria-controls="gpc-panel">Pro <strong>${total.used}/${settings.cap}</strong><small> ${storageAvailable ? '本机' : '权限异常'}</small></button></div>`; }
     function render() {
@@ -637,42 +678,97 @@
       hideHover(); load(); tab = next; collapsed = false; render();
       root?.querySelector('[data-action="collapse"]')?.focus();
     }
-    function nativeTrigger(target) {
-      if (!target || typeof target.closest !== 'function') return null;
-      const el = target.closest('button,[role="button"]'); if (!el || host?.contains(el) || hoverHost?.contains(el)) return null;
-      const label = [el.textContent, el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid')].filter(Boolean).join(' ').trim();
-      if (!/(^|\s)Pro(?:\s|$)|思考强度|思考時間|思考强度|Thinking|reasoning[- ]?effort|thinking[- ]?(?:level|effort|time)/i.test(label)) return null;
-      const rect = el.getBoundingClientRect(); if (!rect.width || !rect.height) return null;
-      const editor = document.querySelector('#prompt-textarea,textarea[name="prompt-textarea"],[contenteditable="true"][data-placeholder],form textarea');
-      if (!editor) return null;
-      // Locate the control around the live composer; exclude subscription/sidebar Pro labels.
-      let ancestor = editor;
-      for (let i = 0; ancestor && i < 6; i++, ancestor = ancestor.parentElement) {
-        if (ancestor === document.body || ancestor === document.documentElement) break;
-        if (ancestor.contains(el)) return el;
+    const editorSelector = '#prompt-textarea,textarea[name="prompt-textarea"],[contenteditable="true"][data-placeholder],form textarea';
+    const controlSelector = 'button,[role="button"],[aria-haspopup],[data-testid="send-button"],[data-testid="composer-send-button"],[data-testid="composer-submit-button"],#composer-submit-button';
+    const excludedRegion = 'header,nav,aside,[role="menu"],[role="dialog"],[role="listbox"]';
+    function visibleControl(el) {
+      if (!el?.isConnected || el.closest('[hidden],[aria-hidden="true"],[inert]')) return false;
+      const rect = el.getBoundingClientRect();
+      if (!rect.width || !rect.height || rect.bottom <= 0 || rect.top >= win.innerHeight || rect.right <= 0 || rect.left >= win.innerWidth) return false;
+      try { const css = win.getComputedStyle(el); if (css.display === 'none' || css.visibility === 'hidden') return false; } catch { /* geometry remains available */ }
+      return true;
+    }
+    function composerFor(el) {
+      if (!el || el.closest(excludedRegion)) return null;
+      for (const editor of document.querySelectorAll(editorSelector)) {
+        if (!visibleControl(editor) || editor.contains(el) || editor.closest(excludedRegion)) continue;
+        const explicit = editor.closest('form,[data-type="unified-composer"],[data-testid="composer"],[data-testid="conversation-composer"],#composer-background');
+        if (explicit) { if (explicit.contains(el)) return explicit; continue; }
+        // React's composer can be a plain div. Require a nearby shared ancestor;
+        // never accept a header/sidebar control merely because it is close on screen.
+        let ancestor = editor.parentElement;
+        for (let i = 0; ancestor && i < 5; i++, ancestor = ancestor.parentElement) {
+          if (ancestor === document.body || ancestor === document.documentElement || ancestor.matches('main,article,[role="main"]')) break;
+          if (ancestor.contains(el)) {
+            const input = editor.getBoundingClientRect(), rect = el.getBoundingClientRect();
+            if (rect.top >= input.top - 100 && rect.bottom <= input.bottom + 160 && rect.left >= input.left - 24 && rect.right <= input.right + 180) return ancestor;
+            break;
+          }
+        }
       }
-      const inputRect = editor.getBoundingClientRect();
-      return rect.top >= inputRect.top - 180 && rect.top <= inputRect.bottom + 130 && rect.left >= inputRect.left - 24 && rect.right <= inputRect.right + 180 ? el : null;
+      return null;
+    }
+    function nativeTrigger(target) {
+      if (!target || typeof target.closest !== 'function' || host?.contains(target) || hoverHost?.contains(target) || incrementHost?.contains(target)) return null;
+      const candidates = [];
+      let control = target.closest(controlSelector);
+      for (let i = 0; control && i < 4; i++, control = control.parentElement?.closest(controlSelector)) candidates.push(control);
+      // Some composer versions render Pro + chevron as clickable div/span content.
+      // Walk from an SVG/path or text wrapper without changing the native hitbox.
+      if (!candidates.length) for (let node = target, i = 0; node && i < 4; node = node.parentElement, i++) {
+        if (/^Pro(?:\s*[⌄⌃▾▿∨])?$/i.test((node.textContent || '').trim())) candidates.push(node);
+      }
+      for (const el of candidates) {
+        if (!visibleControl(el) || !composerFor(el)) continue;
+        const text = (el.textContent || '').trim();
+        const label = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid'), text].filter(Boolean).join(' ').trim();
+        if (/voice|microphone|(?:^|\W)mic(?:\W|$)|speech|audio|dictat|stop|pause|record|语音|語音|麦克风|麥克風|听写|聽寫|录音|錄音|朗读|朗讀|停止|暂停|暫停|upgrade|subscribe|升级|升級/i.test(label)) return null;
+        const testId = el.getAttribute('data-testid') || '';
+        const send = /^(?:send-button|composer-send-button|composer-submit-button)$/.test(testId) || el.id === 'composer-submit-button' || el.getAttribute('type') === 'submit' || /^(?:send(?: message| prompt)?|submit(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)(?:[\s(（]|$)/i.test(label);
+        const pro = /(?:^|\s)Pro(?:\s|$)|思考强度|思考強度|思考時間|Thinking|reasoning[- ]?effort|thinking[- ]?(?:level|effort|time)/i.test(label);
+        if (send || pro) return el;
+      }
+      return null;
+    }
+    function showIncrement(key) {
+      clearTimeout(incrementTimer); incrementHost?.remove();
+      const anchor = visibleControl(lastNativeAnchor) && composerFor(lastNativeAnchor) ? lastNativeAnchor : [...document.querySelectorAll(controlSelector)].find(el => nativeTrigger(el));
+      const rect = anchor?.getBoundingClientRect() || host?.getBoundingClientRect();
+      if (!rect || !document.body) return;
+      const next = document.createElement('div'); next.id = 'chatgpt-pro-local-increment';
+      next.style.cssText = 'all:initial;position:fixed;z-index:2147483647;pointer-events:none!important;user-select:none;';
+      next.style.left = `${Math.max(12, Math.min(rect.left + rect.width / 2 - 22, win.innerWidth - 56))}px`;
+      next.style.top = `${Math.max(12, Math.min(rect.top - 40, win.innerHeight - 44))}px`;
+      next.toggleAttribute('data-dark', host?.hasAttribute('data-dark'));
+      const shadow = next.attachShadow({ mode: 'closed' });
+      renderMarkup(shadow, `<style>${style}</style><div class="count-increment" role="status" aria-label="本机 Pro 已记录加一">+1</div>`);
+      incrementHost = next; incrementKey = key; document.body.appendChild(next);
+      incrementTimer = setTimeout(() => { if (incrementHost === next) clearIncrement(); flushIncrement(); }, 1100);
     }
     function updateHover() {
-      if (!hoverRoot || !activeTrigger || !collapsed || !activeTrigger.isConnected) { if (hoverHost) hoverHost.hidden = true; return; }
+      if (!hoverRoot || !activeTrigger || !collapsed || !nativeTrigger(activeTrigger)) { if (hoverHost) hoverHost.hidden = true; return; }
       const hadFocus = !!hoverRoot.activeElement;
       const total = summarize(records, settings);
-      renderMarkup(hoverRoot, `<style>${style}</style><section class="hover-card" aria-label="Pro 用量，本机估算"><div class="hover-title"><span class="pro-label">✦ Pro</span><span>${settings.mode === 'fixed' ? '本周期' : '最近七天'} · 本机估算</span></div><div class="number">${total.used}<span> / ${settings.cap}</span></div><div class="meter" aria-hidden="true"><div class="fill" style="width:${Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="hover-footer"><span>估算剩余 ${total.remaining}</span><button type="button" data-action="manage">管理用量 ↗</button></div>${storageError ? '<div class="hover-error">存储异常，请打开计数器检查</div>' : ''}</section>`);
+      renderMarkup(hoverRoot, `<style>${style}</style><section class="hover-card" aria-label="Pro 用量，本机估算"><div class="hover-title"><span class="pro-label">✦ Pro</span><span>${settings.mode === 'fixed' ? '本周期' : '最近七天'} · 本机估算</span></div><div class="number">${total.remaining}<span> 次剩余</span></div><div class="meter" aria-hidden="true"><div class="fill" style="width:${Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="hover-footer"><span>已用 ${total.used} / ${settings.cap}</span><button type="button" data-action="manage">管理用量 ↗</button></div>${storageError ? '<div class="hover-error">存储异常，请打开计数器检查</div>' : ''}</section>`);
       hoverHost.hidden = false; positionHover();
       if (hadFocus) hoverRoot.querySelector('[data-action="manage"]')?.focus();
     }
     function positionHover() {
       if (!activeTrigger || !hoverHost || hoverHost.hidden) return;
-      if (!activeTrigger.isConnected) { hideHover(); return; }
-      const rect = activeTrigger.getBoundingClientRect(), size = hoverHost.getBoundingClientRect();
+      if (!nativeTrigger(activeTrigger)) { hideHover(); return; }
+      const rect = activeTrigger.getBoundingClientRect();
+      const available = Math.max(rect.top - 74, win.innerHeight - rect.bottom - 24);
+      if (available < 56) { hideHover(); return; }
+      const card = hoverRoot.querySelector('.hover-card');
+      if (card) card.style.maxHeight = `${available}px`;
+      const size = hoverHost.getBoundingClientRect();
       const pos = hoverPosition(rect, size.width || 266, size.height || 148, win.innerWidth, win.innerHeight);
       hoverHost.style.left = `${pos.left}px`; hoverHost.style.top = `${pos.top}px`;
     }
     function showHover(el) {
       clearTimeout(hoverHideTimer); clearTimeout(hoverTimer);
       if (!collapsed) return;
-      activeTrigger = el; hoverTimer = setTimeout(() => { load(); updateHover(); }, 100);
+      activeTrigger = el; lastNativeAnchor = el; hoverTimer = setTimeout(() => { load(); updateHover(); }, 100);
     }
     function hideHover() { clearTimeout(hoverTimer); clearTimeout(hoverHideTimer); activeTrigger = null; if (hoverHost) hoverHost.hidden = true; }
     function queueHide() { clearTimeout(hoverHideTimer); hoverHideTimer = setTimeout(hideHover, 280); }
@@ -687,7 +783,7 @@
       hoverRoot.addEventListener('focusout', queueHide);
       hoverRoot.addEventListener('click', event => { if (event.target.closest('[data-action="manage"]')) openPanel('home'); });
       // The native trigger's click/keyboard events are never canceled or replaced.
-      document.addEventListener('click', event => { if (nativeTrigger(event.target)) hideHover(); }, true);
+      document.addEventListener('click', event => { const el = nativeTrigger(event.target); if (el) { lastNativeAnchor = el; hideHover(); } }, true);
       document.addEventListener('keydown', event => {
         if (event.key === 'Escape') { hideHover(); if (!collapsed) closePanel(); }
         if (event.altKey && event.shiftKey && event.code === 'KeyP') { event.preventDefault(); if (collapsed) openPanel(); else closePanel(); }
@@ -699,7 +795,7 @@
       if (!host) return;
       let dark = document.documentElement.classList.contains('dark') || document.documentElement.dataset.theme === 'dark';
       try { if (!dark && !document.documentElement.classList.contains('light') && document.documentElement.dataset.theme !== 'light') dark = win.matchMedia('(prefers-color-scheme: dark)').matches; } catch { /* theme is optional */ }
-      host.toggleAttribute('data-dark', dark); hoverHost?.toggleAttribute('data-dark', dark);
+      host.toggleAttribute('data-dark', dark); hoverHost?.toggleAttribute('data-dark', dark); incrementHost?.toggleAttribute('data-dark', dark);
     }
     function mount() {
       if (!document.body) return false;
@@ -746,7 +842,7 @@
     try { if (getDav().enabled) { const last = Number(gmGet(`${PREFIX}lastSync`, 0)); syncStatus = last ? `上次同步 ${fmt(last)}` : 'WebDAV 已配置，尚未完成同步'; } } catch { /* show storage diagnosis */ }
     diagnostics?.mark('install-observer');
     try {
-      observer = installObserver(win, { save, ledger: () => { load(); return settings.ledger; } });
+      observer = installObserver(win, { save: saveObserved, ledger: () => { load(); return settings.ledger; } });
       if (diagnostics) diagnostics.state.observer = observer.healthy() ? 'installed' : 'not-active';
     } catch (error) {
       storageError = [storageError, '观察器未成功安装。仍可手动计数；请刷新并检查脚本权限。'].filter(Boolean).join(' ');
@@ -757,7 +853,7 @@
     safeMount();
     document.addEventListener('DOMContentLoaded', safeMount, { once: true });
     // React navigation can replace the body or remove our host. Reattach the same roots.
-    try { new MutationObserver(() => { if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); }).observe(document.documentElement, { childList: true, subtree: true }); } catch { /* interval below also recovers */ }
+    try { new MutationObserver(() => { if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); }).observe(document.documentElement, { childList: true, subtree: true }); } catch { /* interval below also recovers */ }
     setInterval(() => {
       const mounted = safeMount(); const before = lastKeys, s = settings.id; load();
       if (mounted && (collapsed || !['settings', 'sync'].includes(tab))) { if (before !== lastKeys || s !== settings.id || !document.hidden) render(); }
