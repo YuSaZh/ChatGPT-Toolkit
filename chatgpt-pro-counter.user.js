@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Pro 本机计数器
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.3
+// @version      1.1.4
 // @homepageURL  https://github.com/YuSaZh/GPT-Pro-Counter
 // @supportURL   https://github.com/YuSaZh/GPT-Pro-Counter/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/GPT-Pro-Counter/main/chatgpt-pro-counter.user.js
@@ -31,7 +31,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.3', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverEditors: 0, hoverMarkers: 0, errors: [] };
+    const state = { version: '1.1.4', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -46,7 +46,7 @@
       },
       show() {
         try { diagnostics.inspectHover?.(); } catch (error) { diagnostics.fail('hover-diagnostics', error); }
-        const text = ['Pro 计数器启动诊断', `脚本版本: ${state.version}`, `启动阶段: ${state.phase}`, `页面检查: ${state.frame}`, `存储接口: ${state.storage}`, `界面状态: ${state.ui}`, `观察器: ${state.observer}`, `菜单接口: ${state.menu}`, `悬停监听: ${state.hoverListeners}`, `可见输入框: ${state.hoverEditors}`, `可见模型标记: ${state.hoverMarkers}`, `最近悬停事件: ${state.hoverEvent}`, `最近控件匹配: ${state.hoverMatch}`, `最近输入框范围: ${state.hoverScope}`, `浮卡状态: ${state.hoverCard}`, `document.readyState: ${document.readyState}`, `近期错误: ${state.errors.length ? state.errors.join('\n') : '无'}`, '此报告不读取聊天内容、计数记录或 WebDAV 凭据。'].join('\n');
+        const text = ['Pro 计数器启动诊断', `脚本版本: ${state.version}`, `启动阶段: ${state.phase}`, `页面检查: ${state.frame}`, `存储接口: ${state.storage}`, `界面状态: ${state.ui}`, `观察器: ${state.observer}`, `菜单接口: ${state.menu}`, `悬停监听: ${state.hoverListeners}`, `可见输入框: ${state.hoverEditors}`, `可见模型标记: ${state.hoverMarkers}`, `可见发送锚点: ${state.hoverSends}`, `最近悬停事件: ${state.hoverEvent}`, `最近控件匹配: ${state.hoverMatch}`, `最近输入框范围: ${state.hoverScope}`, `浮卡状态: ${state.hoverCard}`, `最近显示检查: ${state.hoverPaint}`, `document.readyState: ${document.readyState}`, `近期错误: ${state.errors.length ? state.errors.join('\n') : '无'}`, '此报告不读取聊天内容、计数记录或 WebDAV 凭据。'].join('\n');
         try { if (typeof window.alert === 'function') window.alert(text); else console.info(text); } catch { /* retain the return value for diagnostics */ }
         return text;
       }
@@ -459,7 +459,7 @@
     const gmSet = hasStorage ? GM_setValue : (key, value) => volatile.set(key, value);
     const gmKeys = hasStorage ? GM_listValues : () => [...volatile.keys()];
     let settings = defaultSettings(), records = [], root, host, hoverRoot, hoverHost, activeTrigger, collapsed = true, tab = 'home', notice = '', storageError = hasStorage ? '' : 'Tampermonkey 存储权限未就绪：当前仅临时显示，刷新后不会保留。请检查脚本权限再刷新。', observer;
-    let hoverTimer, hoverHideTimer, panelReturnFocus, lastNativeAnchor, incrementHost, incrementTimer, incrementKey, storageAvailable = hasStorage, uiBound = false, uiReady = false;
+    let hoverTimer, hoverHideTimer, panelDraft, nativeBindingTimer, panelReturnFocus, lastNativeAnchor, incrementHost, incrementTimer, incrementKey, storageAvailable = hasStorage, uiBound = false, uiReady = false;
     let refreshTimer, lastKeys = '', settingsSnapshot = '', syncBusy = false, syncStatus = '未启用 WebDAV', lastSyncAttempt = 0, configEpoch = 0, currentAbort = null;
     // UI-only state; never persisted or included in backups/sync.
     const knownCountKeys = new Set(), queuedIncrements = new Map();
@@ -587,7 +587,7 @@
         try {
           const action = b.dataset.action; notice = '';
           if (['home', 'log', 'settings', 'sync'].includes(action)) { load(); tab = action; collapsed = false; render(); return; }
-          if (action === 'collapse' || action === 'expand') { if (action === 'expand') openPanel('home'); else closePanel(); return; }
+          if (action === 'collapse' || action === 'expand') { if (action === 'expand') openPanel(); else closePanel(); return; }
           if (action === 'plus' || action === 'minus') { load(); manual(action === 'plus' ? 1 : -1); render(); return; }
           if (action === 'sync-now') { void doSync(); return; }
           if (action === 'sync-off') { const cfg = getDav(); gmSet(`${PREFIX}webdav`, { ...cfg, interval: 0 }); syncStatus = '自动同步已关闭；仍可手动同步'; }
@@ -674,14 +674,35 @@
       } catch (error) { syncStatus = error.message; }
       finally { syncBusy = false; if (!auto || !['settings', 'sync'].includes(tab)) render(); }
     }
-    function closePanel() {
+    function closePanel(restoreFocus = true) {
+      if (collapsed) return;
+      const form = root?.querySelector(tab === 'settings' ? '#settings' : tab === 'sync' ? '#webdav' : '#no-draft');
+      // Keep a dismissed form only in this page's memory, including an unsaved
+      // password. Closing never saves, tests, syncs, or uploads any field.
+      panelDraft = form ? { tab, snapshot: settingsSnapshot, fields: [...form.querySelectorAll('input,select')].map(el => ({ id: el.id, value: el.value, checked: el.checked })) } : null;
       collapsed = true; render();
-      if (panelReturnFocus?.isConnected) panelReturnFocus.focus(); else root?.querySelector('[data-action="expand"]')?.focus();
+      if (restoreFocus) {
+        if (panelReturnFocus?.isConnected) panelReturnFocus.focus(); else root?.querySelector('[data-action="expand"]')?.focus();
+      }
     }
-    function openPanel(next = 'home') {
+    function openPanel(next = panelDraft?.tab || 'home') {
       panelReturnFocus = activeTrigger?.isConnected ? activeTrigger : null;
       hideHover(); load(); tab = next; collapsed = false; render();
+      if (panelDraft?.tab === next) {
+        for (const field of panelDraft.fields) {
+          const el = root.querySelector(`#${field.id}`);
+          if (el) { el.value = field.value; if (el.getAttribute('type') === 'checkbox') el.checked = field.checked; }
+        }
+        if (next === 'settings') settingsSnapshot = panelDraft.snapshot;
+      }
+      panelDraft = null;
       root?.querySelector('[data-action="collapse"]')?.focus();
+    }
+    function eventInside(event, container) {
+      return !!container && (event.composedPath?.().includes(container) || event.target === container || container.contains(event.target));
+    }
+    function dismissOutside(event) {
+      if (!collapsed && !eventInside(event, host) && !eventInside(event, hoverHost)) closePanel(false);
     }
     const editorSelector = '#prompt-textarea,textarea[name="prompt-textarea"],[contenteditable="true"][data-placeholder],form textarea';
     const composerSelector = 'form,[data-type="unified-composer"],[data-testid="composer"],[data-testid="conversation-composer"],#composer-background';
@@ -752,12 +773,19 @@
       }
       for (const el of candidates) {
         if (!visibleControl(el)) { detail.match = 'not-visible'; continue; }
-        if (!composerFor(el, detail)) { detail.match = 'outside-composer'; continue; }
+        if (el.closest(excludedRegion)) { detail.match = 'outside-composer'; detail.scope = 'excluded-region'; continue; }
         const text = controlText(el);
         const label = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid'), text].filter(Boolean).join(' ').trim();
         if (/voice|microphone|(?:^|\W)mic(?:\W|$)|speech|audio|dictat|stop|pause|record|语音|語音|麦克风|麥克風|听写|聽寫|录音|錄音|朗读|朗讀|停止|暂停|暫停|upgrade|subscribe|升级|升級/i.test(label)) { detail.match = 'excluded-control'; return finish(null); }
         const testId = el.getAttribute('data-testid') || '';
-        const send = /^(?:send-button|composer-send-button|composer-submit-button)$/.test(testId) || el.id === 'composer-submit-button' || el.getAttribute('type') === 'submit' || /^(?:send(?: message| prompt)?|submit(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)(?:[\s(（]|$)/i.test(label);
+        // The reported Send button is an authoritative anchor by itself. Do
+        // not make it depend on discovering the editor or its current parents.
+        const sendLabel = /^(?:send(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)$/i.test((el.getAttribute('aria-label') || '').trim());
+        const explicitSend = /^(?:send-button|composer-send-button|composer-submit-button)$/.test(testId) || el.id === 'composer-submit-button';
+        const observedSend = el.matches('button[type="submit"].size-token-button-composer') && sendLabel;
+        if (explicitSend || observedSend) { detail.match = 'send-control'; detail.scope = 'direct-send-anchor'; return finish(el); }
+        if (!composerFor(el, detail)) { detail.match = 'outside-composer'; continue; }
+        const send = /^(?:send-button|composer-send-button|composer-submit-button)$/.test(testId) || el.id === 'composer-submit-button' || /^(?:send(?: message| prompt)?|submit(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)(?:[\s(（]|$)/i.test(label);
         const modelMarker = el.getAttribute('data-composer-navigation-target') === 'reasoning' || el.getAttribute('data-codex-intelligence-trigger') === 'true';
         const pro = /\bPro\b|思考强度|思考強度|思考時間|Thinking|reasoning[- ]?effort|thinking[- ]?(?:level|effort|time)/i.test(label);
         if (send || modelMarker || pro) { detail.match = send ? 'send-control' : modelMarker ? 'model-marker' : 'model-label'; return finish(el); }
@@ -768,11 +796,12 @@
     if (diagnostics) diagnostics.inspectHover = () => {
       diagnostics.state.hoverEditors = [...document.querySelectorAll(editorSelector)].filter(el => visibleControl(el) && !el.closest(excludedRegion)).length;
       diagnostics.state.hoverMarkers = [...document.querySelectorAll(modelMarkerSelector)].filter(el => visibleControl(el) && composerFor(el)).length;
+      diagnostics.state.hoverSends = [...document.querySelectorAll(controlSelector)].filter(el => { const trigger = nativeTrigger(el); return trigger === el && (/send|submit/.test(el.getAttribute('data-testid') || el.id) || /^(?:send(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)$/i.test((el.getAttribute('aria-label') || '').trim())); }).length;
       // Counts and fixed reason labels only: no URLs, attributes, chat text or DOM.
     };
     function showIncrement(key) {
       clearTimeout(incrementTimer); incrementHost?.remove();
-      const anchor = visibleControl(lastNativeAnchor) && composerFor(lastNativeAnchor) ? lastNativeAnchor : [...document.querySelectorAll(controlSelector)].find(el => nativeTrigger(el));
+      const anchor = nativeTrigger(lastNativeAnchor) ? lastNativeAnchor : [...document.querySelectorAll(controlSelector)].find(el => nativeTrigger(el));
       const rect = anchor?.getBoundingClientRect() || host?.getBoundingClientRect();
       if (!rect || !document.body) return;
       const next = document.createElement('div'); next.id = 'chatgpt-pro-local-increment';
@@ -786,11 +815,11 @@
       incrementTimer = setTimeout(() => { if (incrementHost === next) clearIncrement(); flushIncrement(); }, 1100);
     }
     function updateHover() {
-      if (!hoverRoot || !activeTrigger || !collapsed || !nativeTrigger(activeTrigger)) { if (hoverHost) hoverHost.hidden = true; if (diagnostics) diagnostics.state.hoverCard = 'hidden'; return; }
+      if (!hoverRoot || !activeTrigger || !nativeTrigger(activeTrigger)) { setHoverVisible(false); if (diagnostics) diagnostics.state.hoverCard = 'hidden'; return; }
       const hadFocus = !!hoverRoot.activeElement;
       const total = summarize(records, settings);
       renderMarkup(hoverRoot, `<style>${style}</style><section class="hover-card" aria-label="Pro 用量，本机估算"><div class="hover-title"><span class="pro-label">✦ Pro</span><span>${settings.mode === 'fixed' ? '本周期' : '最近七天'} · 本机估算</span></div><div class="number">${total.remaining}<span> 次剩余</span></div><div class="meter" aria-hidden="true"><div class="fill" style="width:${Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="hover-footer"><span>已用 ${total.used} / ${settings.cap}</span><button type="button" data-action="manage">管理用量 ↗</button></div>${storageError ? '<div class="hover-error">存储异常，请打开计数器检查</div>' : ''}</section>`);
-      hoverHost.hidden = false; positionHover();
+      setHoverVisible(true); positionHover();
       if (hadFocus) hoverRoot.querySelector('[data-action="manage"]')?.focus();
     }
     function positionHover() {
@@ -804,16 +833,54 @@
       if (pos.maxHeight < 56) { hideHover(); if (diagnostics) diagnostics.state.hoverCard = 'no-viewport-space'; return; }
       if (card) card.style.maxHeight = `${pos.maxHeight}px`;
       hoverHost.style.left = `${pos.left}px`; hoverHost.style.top = `${pos.top}px`;
-      if (diagnostics) diagnostics.state.hoverCard = `visible-${pos.placement}`;
+      if (diagnostics) {
+        diagnostics.state.hoverCard = `visible-${pos.placement}`;
+        try {
+          const css = win.getComputedStyle(hoverHost), bounds = hoverHost.getBoundingClientRect();
+          diagnostics.state.hoverPaint = [hoverHost.hidden ? 'hidden-attribute' : 'unhidden', css.display === 'none' ? 'display-none' : 'display-present', /^(?:hidden|collapse)$/.test(css.visibility) ? 'visibility-hidden' : 'visibility-visible', css.opacity === '0' ? 'opacity-zero' : 'opacity-present', bounds.width > 0 && bounds.height > 0 ? 'nonzero-bounds' : 'zero-bounds'].join(' / ');
+        } catch { diagnostics.state.hoverPaint = 'unavailable'; }
+      }
+    }
+    function setHoverVisible(visible) {
+      if (!hoverHost) return;
+      hoverHost.hidden = !visible;
+      // Be explicit at the outer host boundary; page styles and Shadow DOM
+      // resets must not leave an unhidden card with display:none or opacity:0.
+      hoverHost.style.setProperty('display', visible ? 'block' : 'none', 'important');
     }
     function showHover(el) {
-      clearTimeout(hoverHideTimer); clearTimeout(hoverTimer);
-      if (!collapsed) return;
-      activeTrigger = el; lastNativeAnchor = el; hoverTimer = setTimeout(() => { load(); updateHover(); }, 100);
+      clearTimeout(hoverHideTimer);
+      if (el === activeTrigger && (hoverTimer || !hoverHost?.hidden)) return;
+      clearTimeout(hoverTimer);
+      activeTrigger = el; lastNativeAnchor = el;
+      hoverTimer = setTimeout(() => { hoverTimer = null; load(); updateHover(); }, 100);
     }
-    function hideHover() { clearTimeout(hoverTimer); clearTimeout(hoverHideTimer); activeTrigger = null; if (hoverHost) hoverHost.hidden = true; if (diagnostics) diagnostics.state.hoverCard = 'hidden'; }
+    function hideHover() { clearTimeout(hoverTimer); hoverTimer = null; clearTimeout(hoverHideTimer); activeTrigger = null; setHoverVisible(false); if (diagnostics) diagnostics.state.hoverCard = 'hidden'; }
     function queueHide() { clearTimeout(hoverHideTimer); hoverHideTimer = setTimeout(hideHover, 280); }
+    function enterNative(event) {
+      if (diagnostics) diagnostics.state.hoverEvent = event.type;
+      const el = nativeTrigger(event.currentTarget || event.target, true);
+      if (el) showHover(el);
+    }
+    const boundNativeControls = new WeakSet();
+    function bindNativeControls() {
+      for (const el of document.querySelectorAll(controlSelector)) {
+        if (boundNativeControls.has(el)) continue;
+        boundNativeControls.add(el);
+        // Direct non-bubbling listeners also work when a page stops delegated
+        // pointer events. Evaluate labels again on entry after Send -> Stop.
+        for (const type of ['pointerenter', 'mouseenter', 'focus']) el.addEventListener(type, enterNative);
+        for (const type of ['pointerleave', 'mouseleave', 'blur']) el.addEventListener(type, () => { if (activeTrigger === el) queueHide(); });
+      }
+    }
+    function scheduleNativeBindings() {
+      if (nativeBindingTimer) return;
+      nativeBindingTimer = setTimeout(() => { nativeBindingTimer = null; bindNativeControls(); }, 0);
+    }
     function setupHover() {
+      bindNativeControls();
+      document.addEventListener('pointerdown', dismissOutside, true);
+      document.addEventListener('click', dismissOutside, true);
       document.addEventListener('pointerover', event => { if (diagnostics) diagnostics.state.hoverEvent = 'pointerover'; const el = nativeTrigger(event.target, true); if (el && el !== activeTrigger) showHover(el); else if (el) clearTimeout(hoverHideTimer); }, true);
       document.addEventListener('pointerout', event => { if (activeTrigger && activeTrigger.contains(event.target) && !activeTrigger.contains(event.relatedTarget)) queueHide(); }, true);
       document.addEventListener('focusin', event => { if (diagnostics) diagnostics.state.hoverEvent = 'focusin'; const el = nativeTrigger(event.target, true); if (el) showHover(el); }, true);
@@ -826,7 +893,7 @@
       // The native trigger's click/keyboard events are never canceled or replaced.
       document.addEventListener('click', event => { const el = nativeTrigger(event.target); if (el) { lastNativeAnchor = el; hideHover(); } }, true);
       document.addEventListener('keydown', event => {
-        if (event.key === 'Escape') { hideHover(); if (!collapsed) closePanel(); }
+        if (event.key === 'Escape') { if (!collapsed) closePanel(); hideHover(); }
         if (event.altKey && event.shiftKey && event.code === 'KeyP') { event.preventDefault(); if (collapsed) openPanel(); else closePanel(); }
       });
       win.addEventListener('resize', positionHover, { passive: true });
@@ -848,7 +915,7 @@
         nextHost.style.cssText = 'all:initial;position:fixed!important;right:16px!important;bottom:18px!important;z-index:2147483646!important;display:block!important;';
         const nextRoot = nextHost.attachShadow({ mode: 'closed' });
         const nextHoverHost = document.createElement('div'); nextHoverHost.id = 'chatgpt-pro-local-hover'; nextHoverHost.hidden = true;
-        nextHoverHost.style.cssText = 'position:fixed;z-index:2147483645;';
+        nextHoverHost.style.cssText = 'position:fixed!important;z-index:2147483647!important;display:none!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;';
         const nextHoverRoot = nextHoverHost.attachShadow({ mode: 'closed' });
         host = nextHost; root = nextRoot; hoverHost = nextHoverHost; hoverRoot = nextHoverRoot;
       }
@@ -895,11 +962,11 @@
     safeMount();
     document.addEventListener('DOMContentLoaded', safeMount, { once: true });
     // React navigation can replace the body or remove our host. Reattach the same roots.
-    try { new MutationObserver(() => { if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); }).observe(document.documentElement, { childList: true, subtree: true }); } catch { /* interval below also recovers */ }
+    try { new MutationObserver(() => { if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'hidden', 'id'] }); } catch { /* interval below also recovers */ }
     setInterval(() => {
       const mounted = safeMount(); const before = lastKeys, s = settings.id; load();
       if (mounted && (collapsed || !['settings', 'sync'].includes(tab))) { if (before !== lastKeys || s !== settings.id || !document.hidden) render(); }
-      positionHover();
+      bindNativeControls(); positionHover();
     }, 5000);
     setInterval(() => { try { const cfg = getDav(); const since = Math.max(lastSyncAttempt, Number(gmGet(`${PREFIX}lastSync`, 0))); if (storageAvailable && cfg.enabled && cfg.tested && cfg.approved && cfg.interval > 0 && Date.now() - since >= cfg.interval * 60000) void doSync(true); } catch { /* no optional-sync failure may remove the UI */ } }, 15000);
     win.addEventListener('focus', () => { const mounted = safeMount(); load(); if (mounted && (collapsed || !['settings', 'sync'].includes(tab))) render(); });

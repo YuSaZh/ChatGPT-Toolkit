@@ -1,13 +1,13 @@
 # 验证记录
 
-版本：1.1.3（实验预览）  
+版本：1.1.4（实验预览）  
 日期：2026-10-13  
 运行时：Node.js v24.19.0
 
 ## 已通过
 
 - `node --check chatgpt-pro-counter.user.js`：语法检查通过。
-- `node --test *.test.cjs`：138 项测试全部通过，无跳过。
+- `node --test *.test.cjs`：158 项测试全部通过，无跳过。
 - 发布元信息测试：版本号、GitHub 下载 / 更新链接、脚本身份和存储命名空间。
 - 合成请求测试：模型分类、周期边界、去重、失败 / 取消、流读取边界与原请求语义。
 - 存储与 WebDAV 测试：导入校验、凭据排除、条件写入、冲突合并、取消和存储失败保护。
@@ -33,9 +33,18 @@
 - 源码差异局限于版本、悬停控件 / 范围识别、位置和诊断；计数、网络观察、鉴权 / WebDAV、存储及 +1 队列逻辑未更改。相关原有测试全部重新通过。
 - 手工合成页面已加入已报告的按钮关键属性和下方原生提示；该页面也不是实际 ChatGPT 环境。
 
+## 1.1.4 新增验证
+
+- 20 项独立回归覆盖用户报告的发送按钮属性、无输入框祖先定位、英文 Send、SVG、直接 pointerenter / mouseenter / focus、语音 / 停止 / 非聊天表单排除、SPA 重新绑定、浮卡宿主显示开关。
+- 面板外部 pointerdown / click 关闭；Shadow DOM 内部 / 入口保留；不取消原生事件、不抢外部焦点；设置和密码草稿只保存在内存，重开恢复，设置版本冲突检查仍有效。
+- 新增回归复现并修复 Escape 关闭后恢复原生控件焦点重新弹出悬停的问题：焦点恢复后清除悬停计时器。
+- `ui-send-smoke.cjs` 使用已报告的完整发送按钮 DOM，提供 Chromium 实际事件 / computed style / SPA / 草稿验证脚本。脚本语法检查通过，但本次环境未能启动 Chromium，所以未把其页面断言标记为通过。
+- 当前面板展开也不会压制发送悬停。诊断包含可见发送锚点数量与最近显示检查，仅保留固定样式分类 / 非零尺寸标记，不收集页面内容。
+- 源码差异仅涉及版本、界面交互 / 显示 / 诊断；计数与请求观察、WebDAV、持久化键和发布 URL 保持不变。所有原有测试重新通过。
+
 ## 未完成 / 受阻
 
-- Playwright / Chromium 合成浏览器测试：1.1.3 本次重新运行 `node ui-smoke.cjs`，Chromium 启动仍因 `socket() failed: Operation not permitted` 退出，尚未进入页面测试；没有将此阶段标为通过。
+- Playwright / Chromium 合成浏览器测试：1.1.4 本次运行 `node ui-send-smoke.cjs` 及最小启动检查，常规和经批准的提高权限启动均因 `socket() failed: Operation not permitted` 退出，尚未进入页面测试；没有将此阶段标为通过。
 - 真实 Tampermonkey 扩展注入：未验证。
 - 真实 ChatGPT 账号与当前网页交互：未验证；已有用户提供的按钮片段与截图，但外围 DOM、脚本注入及交互结果仍需在用户环境确认。
 - 真实 WebDAV 服务：未验证。测试使用模拟响应和明确的假凭据。
@@ -49,10 +58,10 @@ node --check chatgpt-pro-counter.user.js
 node --test *.test.cjs
 ```
 
-如机器已安装 Playwright 和 Chromium，可另外运行 `node ui-smoke.cjs`、`node audit-bootstrap.cjs`。两者默认使用 `/usr/bin/chromium`；不同系统可修改脚本中的浏览器路径。它们仍是合成页面测试，不能替代实际扩展与 ChatGPT 页面验收。
+如机器已安装 Playwright 和 Chromium，可另外运行 `node ui-smoke.cjs`、`node audit-bootstrap.cjs`、`node ui-send-smoke.cjs`。这些脚本默认使用 `/usr/bin/chromium`；不同系统可修改脚本中的浏览器路径。它们仍是合成页面测试，不能替代实际扩展与 ChatGPT 页面验收。
 
 本版脚本 SHA-256：
 
 ```text
-4658bbaca66d412804cbfbf356a99bd5791a418acb8b1bfc5c2795fe039acc30
+94a1e4031c72d52afca80655eb69bc7d094a671177f4089ede76f7453c6b59cb
 ```
