@@ -1,6 +1,6 @@
-# ChatGPT Pro 本机计数器 + 可选 WebDAV 同步
+# ChatGPT Toolkit 使用指南
 
-版本 1.1.6（实验预览）。一个独立的中文 Tampermonkey 脚本。安装文件：`chatgpt-pro-counter.user.js`。
+版本 1.1.7（实验预览）。面向 ChatGPT 网页体验的独立中文 Tampermonkey 工具集；当前提供 Pro 本机计数、被动图片额度显示及可选 WebDAV 同步。安装文件：`chatgpt-pro-counter.user.js`。
 
 它统计安装后实际观察到的 Pro 请求，提供本周期已用、估算剩余、日志和手动校准。**Pro 次数不是 OpenAI 官方额度查询；默认上限 100 只是可修改的初始设置。图片行单独被动显示本页响应中的最近额度快照。**
 
@@ -9,12 +9,18 @@
 ## 安装与第一次设置
 
 1. 安装或更新 [Tampermonkey](https://www.tampermonkey.net/)。WebDAV 同步要求 **5.5.1 或更新版**；低于此版本会拒绝联网同步，本机计数仍可使用。
-2. 点击 [安装 / 更新 GPT Pro Counter](https://raw.githubusercontent.com/YuSaZh/GPT-Pro-Counter/main/chatgpt-pro-counter.user.js)，在 Tampermonkey 中确认安装或更新。**已安装旧版时，先在安装页核对为更新同一脚本；不要删除旧脚本或另建重复副本。** 如未识别为更新，可编辑原来的“ChatGPT Pro 本机计数器”，用此链接内新版全文覆盖并保存。脚本名称、命名空间和 `gpc.v1.` 存储键保持不变。重要记录建议先导出备份。
+2. 点击 [安装 / 更新 ChatGPT Toolkit](https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js)，在 Tampermonkey 中确认安装或更新。**已安装旧版时，先在安装页核对为更新同一脚本；不要删除旧脚本或另建重复副本。** 如未识别为更新，可编辑原来的“ChatGPT Pro 本机计数器”，用此链接内新版全文覆盖并保存。脚本名称、命名空间和 `gpc.v1.` 存储键保持不变。重要记录建议先导出备份。
 3. 刷新 `https://chatgpt.com/`。正常启动后，右下角出现小巧的 `Pro 0/100 本机` 入口；有旧记录时显示原来的统计值。默认当前输入框选中 Pro 时，将鼠标停在原生 **Pro 或发送按钮** 上，会出现用量卡；可在设置中改为所有模型。原来的点击菜单和快捷键保留。如果连入口都没有，请检查 Tampermonkey 是否启用、该站点访问权限、浏览器的“允许用户脚本”权限。官方说明：[用户脚本权限](https://www.tampermonkey.net/faq.php#Q209)。
 4. 点击右下角入口 →“设置”：填写你的实际上限、已确认的周期重置时间，以及安装前的“当前已用”。不知道初始用量时可暂留空，之后校准。
 5. 正常使用 ChatGPT。安装前的历史不会补算；打开、刷新历史对话不会增加计数。
 
+### 更名兼容
+
+项目及面板标题为 **ChatGPT Toolkit**，原项目名为 GPT-Pro-Counter。Tampermonkey 安装列表中的 `@name` 继续使用“ChatGPT Pro 本机计数器”，`@namespace` 保留 `local.chatgpt.pro-counter`；`chatgpt-pro-counter.user.js` 文件名、`gpc.v1.` 存储键和 v1 备份 / WebDAV 格式均不变，避免重复安装或旧记录失联。新源码的主页、反馈及下载 / 更新地址已改为 `YuSaZh/ChatGPT-Toolkit`。无需迁移；若检查旧地址失败，用上面的新链接更新原脚本，不要另装一份。
+
 ### 新版界面
+
+1.1.7 将悬浮用量卡从 266 缩至 248 CSS 像素宽，内边距从 12×14 缩至 10×12 像素，主数字从 30 缩至 28 像素；图片剩余保持 11 像素灰字。长数字、读取时间和操作行可换行，窄窗口自动收缩。管理面板仍为 310 CSS 像素，显示模式及内容不变。
 
 1.1.6 在“设置”顶部新增“悬浮卡显示”分段开关：
 
@@ -147,7 +153,7 @@ node ui-smoke.cjs
 
 解压后可用浏览器直接打开 `ui-fixture.html`，它引用同目录的真实脚本，预置 11/100，只用内存模拟存储。可以查看深浅主题、原生 Pro 悬停、原生点击、面板设置、关闭和入口恢复。验收页不是 ChatGPT，不连接账号，不发送真实 WebDAV 请求；也不能替代扩展沙箱及实际网页兼容性验收。
 
-开发者可运行 `node --test *.test.cjs`。安装 Playwright 且浏览器环境可用时，运行 `node ui-smoke.cjs`、`node audit-bootstrap.cjs` 、`node ui-send-smoke.cjs` 与 `node ui-v116-smoke.cjs` 做浏览器合成测试。结果及验证边界见 [验证记录](docs/VALIDATION.md)。
+开发者可运行 `node --test *.test.cjs`。安装 Playwright 且浏览器环境可用时，运行 `node ui-smoke.cjs`、`node audit-bootstrap.cjs` 、`node ui-send-smoke.cjs` 、`node ui-v116-smoke.cjs` 与 `node ui-v117-smoke.cjs` 做浏览器合成测试。结果及验证边界见 [验证记录](docs/VALIDATION.md)。
 
 ### 悬停排障
 

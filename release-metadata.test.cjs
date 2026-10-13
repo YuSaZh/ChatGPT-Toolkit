@@ -6,7 +6,7 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, 'chatgpt-pro-counter.user.js'), 'utf8');
 const header = source.match(/^\/\/ ==UserScript==\n([\s\S]*?)\/\/ ==\/UserScript==/)[1];
 const values = key => [...header.matchAll(new RegExp('^// @' + key + '\\s+(.+)$', 'gm'))].map(match => match[1].trim());
-const raw = 'https://raw.githubusercontent.com/YuSaZh/GPT-Pro-Counter/main/chatgpt-pro-counter.user.js';
+const raw = 'https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js';
 
 test('release preserves script identity and persistent v1 storage namespace', () => {
   assert.deepEqual(values('name'), ['ChatGPT Pro 本机计数器']);
@@ -15,11 +15,11 @@ test('release preserves script identity and persistent v1 storage namespace', ()
 });
 
 test('release uses versioned GitHub update and install metadata', () => {
-  assert.deepEqual(values('version'), ['1.1.6']);
+  assert.deepEqual(values('version'), ['1.1.7']);
   assert.deepEqual(values('updateURL'), [raw]);
   assert.deepEqual(values('downloadURL'), [raw]);
-  assert.deepEqual(values('homepageURL'), ['https://github.com/YuSaZh/GPT-Pro-Counter']);
-  assert.deepEqual(values('supportURL'), ['https://github.com/YuSaZh/GPT-Pro-Counter/issues']);
+  assert.deepEqual(values('homepageURL'), ['https://github.com/YuSaZh/ChatGPT-Toolkit']);
+  assert.deepEqual(values('supportURL'), ['https://github.com/YuSaZh/ChatGPT-Toolkit/issues']);
 });
 
 test('release remains restricted to ChatGPT pages without remote runtime dependencies', () => {

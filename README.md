@@ -1,16 +1,22 @@
-# GPT-Pro-Counter
+# ChatGPT Toolkit
 
-非官方 ChatGPT Pro 本机计数器，支持七天统计、手动校准、导入导出和可选 WebDAV 同步。
+面向 ChatGPT 网页使用体验的非官方工具集。当前功能包括 Pro 本机计数、七天统计、手动校准、被动图片额度显示、导入导出和可选 WebDAV 同步。
 
-**1.1.6 实验预览：新增“悬浮卡显示”开关，可选所有模型或仅 Pro；概览与校准按钮改为紧凑布局。** Pro 次数仍是本机估算；图片值只被动读取本页响应，不主动查询。与 OpenAI 无隶属或背书关系。
+**1.1.7 实验预览：项目及面板标题更名为 ChatGPT Toolkit，悬浮用量卡稍微缩小。** Pro 次数仍是本机估算；图片值只被动读取本页响应，不主动查询。与 OpenAI 无隶属或背书关系。
 
 ## 安装
 
 1. 从 [Tampermonkey（篡改猴）官网](https://www.tampermonkey.net/) 安装适合浏览器的扩展。
-2. **[点击安装 / 更新 GPT Pro Counter](https://raw.githubusercontent.com/YuSaZh/GPT-Pro-Counter/main/chatgpt-pro-counter.user.js)**。
+2. **[点击安装 / 更新 ChatGPT Toolkit](https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js)**。
 3. 在 Tampermonkey 安装页确认后刷新 ChatGPT。正常启动后右下角会出现计数入口；在“设置”中填写实际上限、周期锚点和已用量。默认 `100` 只是可修改的初始设置，不代表官方额度。
 
 已有旧版本：核对安装页是在更新原来的“ChatGPT Pro 本机计数器”，不要先删除旧脚本或另建重复副本。未识别为更新时，可在 Tampermonkey 中编辑原脚本，用安装链接的全部内容覆盖并保存。重要记录建议先导出备份。
+
+## 更名与旧版兼容
+
+项目原名 GPT-Pro-Counter，现为 **ChatGPT Toolkit**；面板标题已同步更新。为让 Tampermonkey 继续识别同一脚本并保留旧记录，安装列表中的 `@name` 仍是“ChatGPT Pro 本机计数器”，`@namespace` 仍是 `local.chatgpt.pro-counter`。这两个旧标识以及 `chatgpt-pro-counter.user.js` 文件名、`gpc.v1.` 存储键、v1 导入导出 / WebDAV 数据格式均特意保留，不需要迁移或删除旧安装。
+
+新的安装与更新地址已指向本仓库；已有脚本仍可先检查更新，若旧地址无法取回，则用上面的新安装链接更新同一脚本。请勿为更名另装一份。
 
 ## 从 GitHub 更新
 
@@ -30,6 +36,8 @@
 如果两项菜单都没有出现，先核对脚本版本、匹配网址、启用状态，以及浏览器的 [用户脚本执行权限](https://www.tampermonkey.net/faq.php#Q209)。诊断功能本身也需要脚本管理器成功执行脚本，不能绕过浏览器限制。
 
 ## 本版界面
+
+悬浮用量卡宽度由 266 缩至 248 CSS 像素，内边距由 12×14 缩至 10×12 像素，主数字由 30 缩至 28 像素；图片剩余仍用 11 像素灰字。标题、长用量和操作行允许换行，窄窗口继续自动收缩；仅调整尺寸，不改变内容或显示条件。管理面板保持 310 CSS 像素。
 
 在“设置 → 悬浮卡显示”选择“仅选择 Pro 时”或“所有模型”。默认保留 1.1.5 的仅 Pro 行为。所有模型表示在 Thinking、Auto、其他或未知模型下，悬停或键盘聚焦已识别的发送 / 模型按钮也能看卡；不是让卡片一直展开。切换立即生效并保存，不需要提交下面的周期设置。
 
@@ -63,7 +71,7 @@ ChatGPT 部分只转发并观察网页本来发起的请求，不主动查询、
 - 不保存聊天正文、Cookie 或 ChatGPT 登录令牌。WebDAV 凭据保存在本机脚本管理器中，不包含在脚本导出或远端计数文件内。
 - `@connect *` 用于支持自选 WebDAV 服务；不需要同步时可保持关闭。WebDAV 功能要求 Tampermonkey 5.5.1+，且服务端支持强 ETag 和条件写入。
 
-完整说明：[中文使用指南](README.zh-CN.md) · [更新记录](CHANGELOG.md) · [验证记录](docs/VALIDATION.md) · [反馈问题](https://github.com/YuSaZh/GPT-Pro-Counter/issues)
+完整说明：[中文使用指南](README.zh-CN.md) · [更新记录](CHANGELOG.md) · [验证记录](docs/VALIDATION.md) · [反馈问题](https://github.com/YuSaZh/ChatGPT-Toolkit/issues)
 
 ## 开发和测试
 
@@ -81,6 +89,7 @@ node ui-smoke.cjs
 node audit-bootstrap.cjs
 node ui-send-smoke.cjs
 node ui-v116-smoke.cjs
+node ui-v117-smoke.cjs
 ```
 
 测试页面和网络响应均为模拟数据，不连接真实 ChatGPT 账号，也不验证实际 Tampermonkey 扩展的注入行为。`ui-fixture.html` 可用来手工查看合成界面。
