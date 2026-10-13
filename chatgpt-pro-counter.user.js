@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Pro 本机计数器
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.4
+// @version      1.1.5
 // @homepageURL  https://github.com/YuSaZh/GPT-Pro-Counter
 // @supportURL   https://github.com/YuSaZh/GPT-Pro-Counter/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/GPT-Pro-Counter/main/chatgpt-pro-counter.user.js
@@ -31,7 +31,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.4', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: '1.1.5', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -200,7 +200,10 @@
   function prepareMeta(input, init) {
     try {
       if (init && own(init, 'body') && init.body != null) {
-        if (typeof init.body === 'string' && init.body.length <= MAX_BODY) return Promise.resolve(requestMeta(JSON.parse(init.body)));
+        if (typeof init.body === 'string' && init.body.length <= MAX_BODY) {
+          const body = init.body;
+          return Promise.resolve().then(() => requestMeta(JSON.parse(body))).catch(() => ({ requested: '', seed: '', known: false }));
+        }
         return Promise.resolve({ requested: '', seed: '', known: false });
       }
       if (input && typeof input.clone === 'function') {
@@ -271,38 +274,107 @@
     } catch { report('bounded'); }
     finally { clearTimeout(timer); if (reader) { try { Promise.resolve(reader.cancel()).catch(() => {}); } catch { /* ignore */ } } }
   }
-  function installObserver(win, { save, ledger, changed = () => {}, clock = Date.now, random = uuid, hash = digest, inspect = inspectResponse }) {
+  // Protocol facts only: conversation/init -> limits_progress -> image_gen.
+  // Reference: zetaloop/chatgpt-checker-next @ 0d7bf4a (AGPL-3.0).
+  // This bounded parser/observer is independently implemented; no source is reused.
+  const IMAGE_QUOTA_TTL = 60000;
+  function imageQuotaRequest(input, init, base) {
+    try {
+      const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, base);
+      const method = String(init?.method || input?.method || 'GET').toUpperCase();
+      if (url.origin !== new URL(base).origin) return '';
+      if (method === 'POST' && /^\/backend-api\/conversation\/init\/?$/.test(url.pathname)) return 'quota';
+      // Invalidate on account/session reads and state-changing requests. Never
+      // inspect headers, cookies, credentials, or request bodies for this feature.
+      if (/^\/(?:api\/auth(?:\/|$)|backend-api\/(?:accounts?|me)(?:\/|$))/.test(url.pathname) || !['GET', 'HEAD', 'OPTIONS'].includes(method)) return 'invalidate';
+    } catch { /* an unknown request cannot supply quota */ }
+    return '';
+  }
+  function parseImageQuota(data) {
+    if (!data || !Array.isArray(data.limits_progress) || data.limits_progress.length > 100) return null;
+    const entries = data.limits_progress.filter(entry => entry && entry.feature_name === 'image_gen');
+    if (entries.length !== 1 || !Number.isSafeInteger(entries[0].remaining) || entries[0].remaining < 0) return null;
+    // No reset-period, cap, or unlimited inference from undocumented fields.
+    return { remaining: entries[0].remaining };
+  }
+  function createImageQuotaState({ clock = Date.now, changed = () => {} } = {}) {
+    let epoch = 0, value = null;
+    const notify = () => { try { changed(); } catch { /* optional UI must never disrupt native fetch */ } };
+    return {
+      invalidate() { epoch++; const hadValue = value !== null; value = null; if (hadValue) notify(); return epoch; },
+      accept(token, data) {
+        if (token !== epoch) return false;
+        const parsed = parseImageQuota(data);
+        value = parsed ? { ...parsed, observedAt: clock() } : null;
+        notify(); return value !== null;
+      },
+      current() {
+        if (!value) return null;
+        const now = clock();
+        if (now < value.observedAt || now - value.observedAt >= IMAGE_QUOTA_TTL) { value = null; epoch++; return null; }
+        return { ...value };
+      }
+    };
+  }
+  function installObserver(win, { save, ledger, changed = () => {}, clock = Date.now, random = uuid, hash = digest, inspect = inspectResponse, imageQuota }) {
     const original = win.fetch;
     let observed = 0;
     const tasks = new Set();
     const run = promise => { tasks.add(promise); promise.catch(() => {}).finally(() => tasks.delete(promise)); };
     function wrapper(...args) {
-      if (!targetRequest(args[0], args[1], win.location.href)) return Reflect.apply(original, this, args);
-      const metaPromise = prepareMeta(args[0], args[1]); // Clone before native fetch can lock a Request body.
-      const id = random(), at = clock(), book = ledger();
-      let event;
-      const meta = metaPromise.then(async m => {
-        if (m.skip) return null;
-        const key = m.seed ? `h:${await hash(m.seed)}` : `u:${id}`;
-        event = { v: 1, id, key, ledger: book, at, updated: clock(), state: 'pending', observation: 'pending', delta: 0, requested: m.requested || '', route: '', label: '', conflict: false, stable: !!m.seed, http: 0 };
-        save(event); observed++; changed(); return event;
-      });
-      const patch = data => { if (!event) return; event = { ...event, ...data, updated: Math.max(clock(), event.updated + 1) }; save(event); changed(); };
-      let result;
+      let metaPromise, quotaKind = '', quotaBase = '';
+      try {
+        quotaBase = win.location.href;
+        quotaKind = imageQuota ? imageQuotaRequest(args[0], args[1], quotaBase) : '';
+        // Only Request cloning must precede native fetch locking its body.
+        // String parsing, ledger reads and all response work happen afterwards.
+        if (targetRequest(args[0], args[1], win.location.href)) metaPromise = prepareMeta(args[0], args[1]);
+      } catch { /* observation setup may not stop a page request */ }
+      let result, nativeError, nativeThrew = false;
       try { result = Reflect.apply(original, this, args); }
-      catch (error) { run(meta.then(() => patch({ state: 'failed', observation: 'error' }))); throw error; }
-      // Return the exact native promise and original Response; side inspection never delays the page.
-      run(Promise.resolve(result).then(async response => {
-        // Clone synchronously in the fulfillment callback, before the caller can consume its Response.
-        let copy; if (response.ok) { try { copy = response.clone(); } catch { /* captured as unreadable below */ } }
-        if (!(await meta)) { if (copy?.body) Promise.resolve(copy.body.cancel()).catch(() => {}); return; }
-        patch({ state: response.ok ? 'accepted' : 'failed', http: response.status, observation: response.ok ? 'http' : 'error' });
-        if (copy) await inspect(copy, patch, { alreadyClone: true });
-        else if (response.ok) patch({ observation: 'unreadable' });
-      }, async error => {
-        if (!(await meta)) return;
-        patch({ state: error?.name === 'AbortError' ? 'aborted' : 'failed', observation: 'error' });
-      }));
+      catch (error) { nativeError = error; nativeThrew = true; }
+      // Every invocation reaches native fetch exactly once with the same this,
+      // input/init objects and signal. Optional observer failures are isolated.
+      try {
+        if (quotaKind) {
+          const token = imageQuota.invalidate();
+          if (quotaKind === 'quota' && !nativeThrew) run(Promise.resolve(result).then(async response => {
+            if (!response.ok || response.redirected || !/json/i.test(response.headers.get('content-type') || '')) return;
+            if (response.url && imageQuotaRequest(response.url, { method: 'POST' }, quotaBase) !== 'quota') return;
+            const copy = response.clone();
+            const text = await readBounded(copy.body, 65536, 1500);
+            imageQuota.accept(token, JSON.parse(text));
+          }));
+        }
+        if (metaPromise) {
+          const id = random(), at = clock(), book = ledger();
+          let event;
+          const meta = metaPromise.then(async m => {
+            if (m.skip) return null;
+            const key = m.seed ? `h:${await hash(m.seed)}` : `u:${id}`;
+            event = { v: 1, id, key, ledger: book, at, updated: clock(), state: 'pending', observation: 'pending', delta: 0, requested: m.requested || '', route: '', label: '', conflict: false, stable: !!m.seed, http: 0 };
+            save(event); observed++; changed(); return event;
+          });
+          const patch = data => { if (!event) return; event = { ...event, ...data, updated: Math.max(clock(), event.updated + 1) }; save(event); changed(); };
+          if (nativeThrew) run(meta.then(() => patch({ state: 'failed', observation: 'error' })));
+          else run(Promise.resolve(result).then(async response => {
+            // Clone before the caller can consume its original Response.
+            let copy; if (response.ok) { try { copy = response.clone(); } catch { /* unreadable below */ } }
+            try {
+              if (!(await meta)) return;
+              patch({ state: response.ok ? 'accepted' : 'failed', http: response.status, observation: response.ok ? 'http' : 'error' });
+              if (copy) await inspect(copy, patch, { alreadyClone: true });
+              else if (response.ok) patch({ observation: 'unreadable' });
+            } finally {
+              if (copy?.body && !copy.body.locked) { try { Promise.resolve(copy.body.cancel()).catch(() => {}); } catch { /* clone cleanup only */ } }
+            }
+          }, async error => {
+            if (!(await meta)) return;
+            patch({ state: error?.name === 'AbortError' ? 'aborted' : 'failed', observation: 'error' });
+          }));
+        }
+      } catch { /* no optional count/quota failure changes native completion */ }
+      if (nativeThrew) throw nativeError;
       return result;
     }
     const exposed = typeof exportFunction === 'function' ? exportFunction(wrapper, win) : wrapper;
@@ -463,6 +535,16 @@
     let refreshTimer, lastKeys = '', settingsSnapshot = '', syncBusy = false, syncStatus = '未启用 WebDAV', lastSyncAttempt = 0, configEpoch = 0, currentAbort = null;
     // UI-only state; never persisted or included in backups/sync.
     const knownCountKeys = new Set(), queuedIncrements = new Map();
+    let quotaExpiryTimer;
+    const imageQuota = createImageQuotaState({ changed: () => {
+      clearTimeout(quotaExpiryTimer);
+      const current = imageQuota.current();
+      if (current) quotaExpiryTimer = setTimeout(() => imageQuota.invalidate(), IMAGE_QUOTA_TTL);
+      if (uiReady) updateHover();
+    } });
+    let quotaPage = win.location.href;
+    const invalidateImageQuota = () => { imageQuota.invalidate(); quotaPage = win.location.href; };
+
     const countKey = event => JSON.stringify([event.ledger, event.key]);
     const isProCount = event => event.state === 'accepted' && kindFor(event) === 'pro';
     const rememberCount = event => { if (isProCount(event)) knownCountKeys.add(countKey(event)); };
@@ -552,7 +634,7 @@
       *{box-sizing:border-box}button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:7px 11px;border-radius:10px}button:hover{background:var(--soft)}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #ac8df9;outline-offset:2px}button.primary{background:var(--accent-bg);color:var(--accent);border-color:transparent;font-weight:650}button.ghost{border:none;background:transparent;padding:4px 7px;color:var(--muted)}
       .panel{width:min(356px,calc(100vw - 24px));max-height:calc(100dvh - 94px);overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow)}header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 8px}h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.1px}h1 span{font-size:10px;color:var(--accent);background:var(--accent-bg);padding:3px 6px;margin-left:6px;border-radius:5px;vertical-align:middle}.body{padding:8px 18px 18px}.muted,small{color:var(--muted)}small{font-size:11px}.eyebrow{color:var(--muted);font-size:12px}.number{font-size:42px;letter-spacing:-1.5px;font-weight:700;line-height:1.25;margin-top:5px}.number span{font-size:17px;letter-spacing:0;color:var(--muted);font-weight:400}.meter{height:7px;border-radius:9px;background:var(--soft);overflow:hidden;margin:12px 0}.fill{height:100%;background:linear-gradient(90deg,#3e4ee9,#9766f7,#c995ff);border-radius:9px}.row{display:flex;align-items:center;justify-content:space-between;gap:8px}.meta{font-size:12px;color:var(--muted)}.callout{font-size:11px;color:var(--muted);background:var(--soft);padding:10px 11px;border-radius:10px;margin:12px 0}.warning{color:var(--warn)}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.foot{border-top:1px solid var(--line);padding-top:11px;margin-top:12px;font-size:10px;color:var(--muted)}.chip{padding:9px 13px;border-radius:30px;box-shadow:0 3px 20px #31245c18;font-size:12px;display:flex;align-items:center;gap:4px}.chip strong{color:var(--accent);margin:0 5px}nav{display:flex;gap:5px;padding:0 18px 6px}nav button{font-size:12px;border:none;padding:5px 8px}nav button.active{background:var(--accent-bg);color:var(--accent)}label{display:block;font-size:12px;margin:12px 0 4px}input,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--fg)}.log{list-style:none;margin:0;padding:0}.log li{padding:10px 0;border-bottom:1px solid var(--line)}.log .model{font-size:11px;word-break:break-all;margin-top:3px}.badge{font-size:10px}.empty{padding:25px 0;text-align:center;color:var(--muted)}p{margin:7px 0}.notice{margin:0 18px 8px;padding:8px;background:var(--accent-bg);color:var(--accent);font-size:11px;border-radius:8px} .error{background:var(--soft);color:var(--warn)}
       .count-increment{display:grid;place-items:center;min-width:44px;height:32px;border:1px solid var(--line);border-radius:18px;background:var(--accent-bg);color:var(--accent);font-size:19px;font-weight:750;box-shadow:var(--shadow);animation:count-rise 1.1s ease-out both;pointer-events:none}@keyframes count-rise{0%{opacity:0;transform:translateY(8px) scale(.88)}20%,65%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-16px) scale(1)}}
-      .launcher{display:flex;justify-content:flex-end;margin-top:10px}.chip:before{content:'✦';color:var(--accent);font-size:15px;margin-right:3px}.chip small{font-size:10px}.hover-card{width:min(266px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:16px 18px;background:var(--bg);border:1px solid var(--line);border-radius:20px;box-shadow:0 12px 42px #35245c24;color:var(--fg)}.hover-title{gap:8px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}.pro-label{font-weight:650;letter-spacing:.2px;color:var(--accent)}.hover-card .number{font-size:34px;line-height:1.2;margin:8px 0 0}.hover-card .number span{font-size:16px}.hover-card .meter{margin:10px 0;height:5px}.hover-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted)}.hover-footer button{font-size:11px;color:var(--accent);border:none;background:transparent;padding:3px 0}.hover-error{font-size:11px;color:var(--warn);margin-top:8px}.panel{animation:appear .16s ease-out}.close{font-size:18px;line-height:1}.chip strong{font-variant-numeric:tabular-nums}.number{font-variant-numeric:tabular-nums}.fill{transition:width .22s ease}@keyframes appear{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@media(max-width:460px){.hover-card{width:min(266px,calc(100vw - 24px))}.panel{border-radius:18px}}
+      .launcher{display:flex;justify-content:flex-end;margin-top:10px}.chip:before{content:'✦';color:var(--accent);font-size:15px;margin-right:3px}.chip small{font-size:10px}.hover-card{width:min(266px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:16px 18px;background:var(--bg);border:1px solid var(--line);border-radius:20px;box-shadow:0 12px 42px #35245c24;color:var(--fg)}.hover-title{gap:8px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;align-items:center}.pro-label{font-weight:650;letter-spacing:.2px;color:var(--accent)}.hover-card .number{font-size:34px;line-height:1.2;margin:8px 0 0}.hover-card .number span{font-size:16px}.image-quota{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5;font-variant-numeric:tabular-nums}.hover-card .meter{margin:10px 0;height:5px}.hover-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted)}.hover-footer button{font-size:11px;color:var(--accent);border:none;background:transparent;padding:3px 0}.hover-error{font-size:11px;color:var(--warn);margin-top:8px}.panel{animation:appear .16s ease-out}.close{font-size:18px;line-height:1}.chip strong{font-variant-numeric:tabular-nums}.number{font-variant-numeric:tabular-nums}.fill{transition:width .22s ease}@keyframes appear{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@media(max-width:460px){.hover-card{width:min(266px,calc(100vw - 24px))}.panel{border-radius:18px}}
     `;
     function launcher(total) { return `<div class="launcher"><button type="button" data-action="expand" class="chip" aria-label="打开 Pro 计数器；本机估算 ${total.used}/${settings.cap}" aria-expanded="${!collapsed}" aria-controls="gpc-panel">Pro <strong>${total.used}/${settings.cap}</strong><small> ${storageAvailable ? '本机' : '权限异常'}</small></button></div>`; }
     function render() {
@@ -713,7 +795,12 @@
       if (!el?.isConnected || el.closest('[hidden],[aria-hidden="true"],[inert]')) return false;
       const rect = el.getBoundingClientRect();
       if (!rect.width || !rect.height || rect.bottom <= 0 || rect.top >= win.innerHeight || rect.right <= 0 || rect.left >= win.innerWidth) return false;
-      try { const css = win.getComputedStyle(el); if (css.display === 'none' || css.visibility === 'hidden') return false; } catch { /* geometry remains available */ }
+      try {
+        for (let node = el; node && node !== document.documentElement; node = node.parentElement) {
+          const css = win.getComputedStyle(node);
+          if (css.display === 'none' || /^(?:hidden|collapse)$/.test(css.visibility) || css.opacity === '0') return false;
+        }
+      } catch { /* geometry remains available */ }
       return true;
     }
     function composerFor(el, detail = {}) {
@@ -750,15 +837,45 @@
         if (++visited > 160 || text.length >= 256) return;
         if (node.nodeType === 3) { text += (node.data || '').slice(0, 256 - text.length); return; }
         if (node.nodeType !== 1 || node.matches('[hidden],[aria-hidden="true"],[inert],svg,script,style,[contenteditable="true"],textarea')) return;
-        try { const css = win.getComputedStyle(node); if (css.display === 'none' || css.visibility === 'hidden') return; } catch { /* semantic visibility is still available */ }
+        try { const css = win.getComputedStyle(node); if (css.display === 'none' || /^(?:hidden|collapse)$/.test(css.visibility) || css.opacity === '0') return; } catch { /* semantic visibility is still available */ }
         for (const child of node.childNodes || []) visit(child);
       };
       visit(el);
       return text.replace(/\s+/g, ' ').trim();
     }
+    function selectionScope(trigger) {
+      const known = composerFor(trigger) || trigger.closest(composerSelector);
+      if (known) return known;
+      // A reported native Send + explicit model marker can share a plain-div
+      // shell even before an editor mounts. Never widen to the page/main region.
+      for (let scope = trigger.parentElement, depth = 0; scope && depth < 4; scope = scope.parentElement, depth++) {
+        if (scope === document.body || scope === document.documentElement || scope.matches('main,article,[role="main"]') || scope.closest(excludedRegion)) break;
+        const markers = [...scope.querySelectorAll(modelMarkerSelector)].filter(el => visibleControl(el) && !el.closest(excludedRegion));
+        const sends = [...scope.querySelectorAll('button,[role="button"]')].filter(el => visibleControl(el) && (/^(?:send-button|composer-send-button|composer-submit-button)$/.test(el.getAttribute('data-testid') || '') || el.id === 'composer-submit-button' || (el.matches('button[type="submit"].size-token-button-composer') && /^(?:send(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)$/i.test(el.getAttribute('aria-label') || ''))));
+        if (markers.length !== 1 || sends.length !== 1 || [...scope.querySelectorAll(composerSelector)].length) continue;
+        const model = markers[0].getBoundingClientRect(), send = sends[0].getBoundingClientRect();
+        if (Math.abs(model.top - send.top) <= 80 && Math.abs(model.right - send.left) <= 240) return scope;
+      }
+      return null;
+    }
+    function selectedPro(trigger) {
+      if (!trigger || trigger.closest(excludedRegion)) return false;
+      const scope = selectionScope(trigger);
+      if (!scope || scope === document.body || scope === document.documentElement) return false;
+      // Only the selected label in this composer's visible control matters.
+      // Explicit markers outrank legacy labels; hidden measurement text, plan
+      // names, request history, menu options and default-model metadata do not.
+      const inScope = el => visibleControl(el) && !el.closest(excludedRegion) &&
+        (composerFor(el) === scope || (!composerFor(el) && (el.closest(composerSelector) === scope || (!el.closest(composerSelector) && scope.contains(el)))));
+      let choices = [...scope.querySelectorAll(modelMarkerSelector)].filter(inScope);
+      if (!choices.length) choices = [...scope.querySelectorAll(controlSelector)].filter(el => inScope(el) && /^(?:Pro|Thinking|Instant|Auto|思考强度|思考強度)(?:\s*[⌄⌃▾▿∨])?$/i.test(controlText(el)));
+      choices = choices.filter(el => !choices.some(other => other !== el && other.contains(el)));
+      return choices.length === 1 && /^Pro(?:\s*[⌄⌃▾▿∨])?$/i.test(controlText(choices[0]));
+    }
     function nativeTrigger(target, report = false) {
       const detail = { match: 'no-control', scope: 'unchecked' };
       const finish = el => {
+        if (el && !selectedPro(el)) { el = null; detail.match = 'selected-model-not-pro-or-unknown'; }
         if (report && diagnostics) { diagnostics.state.hoverMatch = detail.match; diagnostics.state.hoverScope = detail.scope; }
         return el;
       };
@@ -816,9 +933,12 @@
     }
     function updateHover() {
       if (!hoverRoot || !activeTrigger || !nativeTrigger(activeTrigger)) { setHoverVisible(false); if (diagnostics) diagnostics.state.hoverCard = 'hidden'; return; }
+      if (quotaPage !== win.location.href || document.hidden) invalidateImageQuota();
+      const quota = imageQuota.current();
+      const imageLine = quota ? `图片剩余 ${quota.remaining} 次 · ${esc(new Date(quota.observedAt).toLocaleTimeString())} 读取` : '图片剩余：暂未获取';
       const hadFocus = !!hoverRoot.activeElement;
       const total = summarize(records, settings);
-      renderMarkup(hoverRoot, `<style>${style}</style><section class="hover-card" aria-label="Pro 用量，本机估算"><div class="hover-title"><span class="pro-label">✦ Pro</span><span>${settings.mode === 'fixed' ? '本周期' : '最近七天'} · 本机估算</span></div><div class="number">${total.remaining}<span> 次剩余</span></div><div class="meter" aria-hidden="true"><div class="fill" style="width:${Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="hover-footer"><span>已用 ${total.used} / ${settings.cap}</span><button type="button" data-action="manage">管理用量 ↗</button></div>${storageError ? '<div class="hover-error">存储异常，请打开计数器检查</div>' : ''}</section>`);
+      renderMarkup(hoverRoot, `<style>${style}</style><section class="hover-card" aria-label="Pro 用量，本机估算"><div class="hover-title"><span class="pro-label">✦ Pro</span><span>${settings.mode === 'fixed' ? '本周期' : '最近七天'} · 本机估算</span></div><div class="number">${total.remaining}<span> 次剩余</span></div><div class="image-quota" title="仅显示本页刚观察到的图片额度；最多保留 60 秒，不主动查询">${imageLine}</div><div class="meter" aria-hidden="true"><div class="fill" style="width:${Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="hover-footer"><span>已用 ${total.used} / ${settings.cap}</span><button type="button" data-action="manage">管理用量 ↗</button></div>${storageError ? '<div class="hover-error">存储异常，请打开计数器检查</div>' : ''}</section>`);
       setHoverVisible(true); positionHover();
       if (hadFocus) hoverRoot.querySelector('[data-action="manage"]')?.focus();
     }
@@ -860,7 +980,7 @@
     function enterNative(event) {
       if (diagnostics) diagnostics.state.hoverEvent = event.type;
       const el = nativeTrigger(event.currentTarget || event.target, true);
-      if (el) showHover(el);
+      if (el) showHover(el); else if (activeTrigger) hideHover();
     }
     const boundNativeControls = new WeakSet();
     function bindNativeControls() {
@@ -879,9 +999,21 @@
     }
     function setupHover() {
       bindNativeControls();
+      // Drop transient account data before possible account/navigation actions.
+      // These listeners never cancel or change native interaction.
+      const invalidateOutsideComposer = event => {
+        const target = event.target;
+        if (host?.contains(target) || hoverHost?.contains(target)) return;
+        if (target?.closest && (composerFor(target) || target.closest(composerSelector) || selectionScope(target))) return;
+        invalidateImageQuota();
+      };
+      document.addEventListener('pointerdown', invalidateOutsideComposer, true);
+      document.addEventListener('keydown', invalidateOutsideComposer, true);
+      document.addEventListener('visibilitychange', invalidateImageQuota);
+      for (const type of ['pagehide', 'pageshow', 'popstate', 'hashchange', 'blur']) win.addEventListener(type, invalidateImageQuota);
       document.addEventListener('pointerdown', dismissOutside, true);
       document.addEventListener('click', dismissOutside, true);
-      document.addEventListener('pointerover', event => { if (diagnostics) diagnostics.state.hoverEvent = 'pointerover'; const el = nativeTrigger(event.target, true); if (el && el !== activeTrigger) showHover(el); else if (el) clearTimeout(hoverHideTimer); }, true);
+      document.addEventListener('pointerover', event => { if (diagnostics) diagnostics.state.hoverEvent = 'pointerover'; const el = nativeTrigger(event.target, true); if (el && el !== activeTrigger) showHover(el); else if (el) clearTimeout(hoverHideTimer); else if (activeTrigger && !hoverHost.contains(event.target) && event.target?.closest?.(controlSelector)) hideHover(); }, true);
       document.addEventListener('pointerout', event => { if (activeTrigger && activeTrigger.contains(event.target) && !activeTrigger.contains(event.relatedTarget)) queueHide(); }, true);
       document.addEventListener('focusin', event => { if (diagnostics) diagnostics.state.hoverEvent = 'focusin'; const el = nativeTrigger(event.target, true); if (el) showHover(el); }, true);
       document.addEventListener('focusout', event => { if (activeTrigger?.contains(event.target)) queueHide(); }, true);
@@ -951,7 +1083,7 @@
     try { if (getDav().enabled) { const last = Number(gmGet(`${PREFIX}lastSync`, 0)); syncStatus = last ? `上次同步 ${fmt(last)}` : 'WebDAV 已配置，尚未完成同步'; } } catch { /* show storage diagnosis */ }
     diagnostics?.mark('install-observer');
     try {
-      observer = installObserver(win, { save: saveObserved, ledger: () => { load(); return settings.ledger; } });
+      observer = installObserver(win, { save: saveObserved, ledger: () => { load(); return settings.ledger; }, imageQuota });
       if (diagnostics) diagnostics.state.observer = observer.healthy() ? 'installed' : 'not-active';
     } catch (error) {
       storageError = [storageError, '观察器未成功安装。仍可手动计数；请刷新并检查脚本权限。'].filter(Boolean).join(' ');
@@ -962,16 +1094,16 @@
     safeMount();
     document.addEventListener('DOMContentLoaded', safeMount, { once: true });
     // React navigation can replace the body or remove our host. Reattach the same roots.
-    try { new MutationObserver(() => { if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'hidden', 'id'] }); } catch { /* interval below also recovers */ }
+    try { new MutationObserver(() => { if (quotaPage !== win.location.href) invalidateImageQuota(); if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'style', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target'] }); } catch { /* interval below also recovers */ }
     setInterval(() => {
       const mounted = safeMount(); const before = lastKeys, s = settings.id; load();
       if (mounted && (collapsed || !['settings', 'sync'].includes(tab))) { if (before !== lastKeys || s !== settings.id || !document.hidden) render(); }
-      bindNativeControls(); positionHover();
+      bindNativeControls(); if (activeTrigger) updateHover(); else if (quotaPage !== win.location.href || document.hidden) invalidateImageQuota(); positionHover();
     }, 5000);
     setInterval(() => { try { const cfg = getDav(); const since = Math.max(lastSyncAttempt, Number(gmGet(`${PREFIX}lastSync`, 0))); if (storageAvailable && cfg.enabled && cfg.tested && cfg.approved && cfg.interval > 0 && Date.now() - since >= cfg.interval * 60000) void doSync(true); } catch { /* no optional-sync failure may remove the UI */ } }, 15000);
     win.addEventListener('focus', () => { const mounted = safeMount(); load(); if (mounted && (collapsed || !['settings', 'sync'].includes(tab))) render(); });
     diagnostics?.mark('ready');
   }
   return { WEEK, PREFIX, modelKind, defaultSettings, validSettings, validEvent, windowFor, kindFor, mergeEvents, grouped, summarize,
-    requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
+    IMAGE_QUOTA_TTL, imageQuotaRequest, parseImageQuota, createImageQuotaState, requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
 });

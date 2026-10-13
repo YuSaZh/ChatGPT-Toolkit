@@ -25,6 +25,8 @@ function setup(options = {}) {
     parent.appendChild(el);
     return el;
   };
+  const selectPro = (parent = form) => control('Pro', { 'data-codex-intelligence-trigger': 'true' }, 'button', parent);
+  if (options.selectedPro !== false) selectPro();
   const nested = parent => {
     const svg = d.createElementNS('http://www.w3.org/2000/svg', 'svg');
     const path = d.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -35,7 +37,7 @@ function setup(options = {}) {
   const show = target => { e.emit(d, 'pointerover', { target }); e.flush(150); };
   const hide = () => e.emit(d, 'keydown', { key: 'Escape' });
   const expectShown = () => { assert.equal(hover().hidden, false); assert.deepEqual(e.errors, []); };
-  return { ...e, form, editor, control, nested, hover, show, hide, expectShown, settings };
+  return { ...e, form, editor, control, selectPro, nested, hover, show, hide, expectShown, settings };
 }
 
 test('review: send-button SVG/path retargets to the whole native button', () => {
@@ -67,7 +69,7 @@ test('review: semantic composer send anchors work without visible send text', ()
 });
 
 test('review: a native non-button Pro dropdown resolves from its visible label and chevron', () => {
-  const e = setup();
+  const e = setup({ selectedPro: false });
   const pro = e.control('', { tabindex: '0', 'aria-haspopup': 'menu' }, 'div');
   const label = e.document.createElement('span'); label.textContent = 'Pro'; pro.appendChild(label);
   const { path } = e.nested(pro);
@@ -135,6 +137,7 @@ test('review: composer replacement discards a detached anchor and recognizes the
   const nextForm = e.document.createElement('form');
   const editor = e.document.createElement('div'); editor.id = 'prompt-textarea'; nextForm.appendChild(editor);
   e.document.body.appendChild(nextForm);
+  e.selectPro(nextForm);
   const next = e.control('', { 'data-testid': 'send-button' }, 'button', nextForm);
   e.show(e.nested(next).path); e.expectShown();
   assert.equal(e.document.listeners.pointerover.length, 1);

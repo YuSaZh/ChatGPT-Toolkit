@@ -7,7 +7,9 @@ const { environment } = require('./audit-dom-fixture.cjs');
 
 function setup(options = {}) {
   const e = environment(options), d = e.document;
-  function sender(parent = d.body) {
+  const composer = d.createElement('div'); composer.setAttribute('data-testid', 'composer'); d.body.appendChild(composer);
+  const model = d.createElement('button'); model.setAttribute('data-codex-intelligence-trigger', 'true'); model.textContent = 'Pro'; composer.appendChild(model);
+  function sender(parent = composer) {
     const button = d.createElement('button');
     button.setAttribute('type', 'submit'); button.setAttribute('aria-label', '发送');
     button.className = 'size-token-button-composer bg-composer-primary';
@@ -33,7 +35,7 @@ function setup(options = {}) {
   return { ...e, ...send, sender, hover, click, showDirect, panelOpen, outside, outsideClick };
 }
 
-test('v114: exact Chinese submit button binds directly without an editor or form ancestor', () => {
+test('v114: exact Chinese submit button binds directly with selected Pro but without an editor or form ancestor', () => {
   const e = setup();
   assert.equal(e.button.hasAttribute('data-testid'), false);
   assert.equal(e.button.closest('form'), null);

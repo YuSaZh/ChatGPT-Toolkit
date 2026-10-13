@@ -86,10 +86,10 @@ test('actual trigger: an editor-only form still allows its nearby sibling trigge
   e.show(e.path); e.shown();
 });
 
-test('actual trigger: stable semantic markers identify the control without localized text', () => {
+test('actual trigger: semantic markers with an unknown visible model fail closed', () => {
   const e = setup();
   e.hiddenLabel.textContent = 'Model selector'; e.visibleLabel.textContent = 'GPT';
-  e.show(e.path); e.shown();
+  e.show(e.path); assert.equal(e.hover().hidden, true);
 });
 
 test('actual trigger: hidden descendants are clickable descendants, but a hidden whole trigger is excluded', () => {
