@@ -112,7 +112,7 @@ test('v1111: managers without a stream retain bounded text and empty response fa
 });
 
 test('v1111: stream HTTP metadata drives real sync MKCOL, GET ETag and conditional PUT', async () => {
-  const settings = api.defaultSettings(Date.UTC(2026, 9, 14)), remote = api.snapshot(settings, []);
+  const settings = api.defaultSettings(Date.UTC(2026, 9, 14)), remote = api.snapshot(settings, [{ v: 1, id: 'persisted', key: 'persisted', ledger: 'default', at: settings.anchor + 1, updated: settings.anchor + 1, state: 'manual', observation: 'manual', delta: 1, requested: '', route: '', label: '', stable: true, conflict: false, http: 0 }]);
   const calls = []; let backups = 0, applies = 0;
   const tx = api.createDavTransport(options => {
     calls.push(options);
@@ -139,3 +139,4 @@ test('v1111: MKCOL final network-zero, auth or directory error never reaches GET
     assert.equal(requests, 1);
   }
 });
+

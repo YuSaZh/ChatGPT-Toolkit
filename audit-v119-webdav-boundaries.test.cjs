@@ -253,7 +253,7 @@ test('v119 audit UI: same-URL mode/version/revision changes in another tab abort
 });
 
 test('v119 audit UI: MKCOL failure releases busy state and a second manual sync can finish', async () => {
-  const e = uiSession(); e.click('sync-now'); e.reply(0, 409); await e.settle();
+  const e = uiSession(); e.click('home'); e.click('plus'); e.click('sync'); e.click('sync-now'); e.reply(0, 409); await e.settle();
   assert.match(e.ui().textContent, /409|父目录|基础目录|基础路径/);
   e.click('sync-now'); assert.equal(e.calls[1].method, 'MKCOL');
   e.reply(1, 201); await e.settle(); e.reply(2, 404); await e.settle();
@@ -264,7 +264,7 @@ test('v119 audit UI: MKCOL failure releases busy state and a second manual sync 
 });
 
 test('v119 audit UI: explicitly enabled tested base mode can perform scheduled MKCOL and guarded sync', async () => {
-  const e = uiSession(config({ interval: 5 }));
+  const e = uiSession(config({ interval: 5 })); e.click('home'); e.click('plus'); e.click('sync');
   // Invoke only the schedule callback; do not run the fixture's synthetic timeout queue.
   e.intervals.at(-1)();
   assert.deepEqual(e.calls.map(row => row.method), ['MKCOL']);
@@ -294,3 +294,4 @@ test('v119 audit UI: configuration and cancellation snapshot must come from the 
   assert.equal(calls.length, 0, 'No request may use stale destination A while comparing against newer configuration B.');
   assert.match(e.ui().textContent, /配置已改变/); assert.deepEqual(e.errors, []);
 });
+

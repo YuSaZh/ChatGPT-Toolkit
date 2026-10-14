@@ -381,10 +381,11 @@ test('review: failed event storage never announces a count that was not saved', 
     },
   });
   await request(e, 'review-failed-storage');
-  await until(() => triedAcceptedWrite);
+  await until(() => { e.flush(150); return /待核对/.test(e.ui().textContent); });
   e.flush(150);
+  assert.equal(triedAcceptedWrite, false, 'stop later writes after the first failed persistence attempt');
   assert.equal(visiblePulses(e).length, 0);
-  assert.match(e.ui().textContent, /0\/100/);
+  assert.match(e.ui().textContent, /待核对/);
   assert.equal(records(e).length, 0);
   assert.deepEqual(e.errors, []);
 });
@@ -403,3 +404,4 @@ test('review: immediate-error attempt does not consume the first +1 for a later 
   assert.match(e.ui().textContent, /1\/100/);
   assert.deepEqual(e.errors, []);
 });
+

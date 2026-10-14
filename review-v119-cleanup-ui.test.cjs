@@ -40,7 +40,7 @@ test('v119 cleanup: captured PoW still shows raw leading zero difficulty, requir
 });
 
 test('v119 new UI: defaults to base, makes only the dedicated directory, saves then syncs data.json', async () => {
-  const e = setup(); e.click('sync');
+  const e = setup(); e.click('home'); e.click('plus'); e.click('sync');
   assert.equal(e.ui().querySelector('#dav-mode').value, 'base');
   assert.equal(e.ui().querySelector('#dav-url-label').textContent, 'HTTPS 基础目录');
   assert.doesNotMatch(e.ui().textContent, /请先建立父目录/);
@@ -122,3 +122,4 @@ test('v119 identity: old ledger/settings keys and import format remain readable 
   const backup = api.snapshot(s, []); assert.equal(api.decodeImport(JSON.stringify(backup)).settings.cap, 500);
   assert.match(source, /^\/\/ @name\s+ChatGPT Toolkit$/m); assert.deepEqual(e.errors, []);
 });
+
