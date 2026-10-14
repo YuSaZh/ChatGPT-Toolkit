@@ -157,7 +157,7 @@ test('v1110: retained settings form does not refresh its stale-settings snapshot
 
 test('v1110: input fix adds no clipboard API, editing emulation, active ChatGPT request or new storage schema', () => {
   assert.doesNotMatch(source, /navigator\.clipboard|clipboardData\.(?:getData|setData)|execCommand\(|new (?:InputEvent|KeyboardEvent|ClipboardEvent)/);
-  assert.match(source, /@name\s+ChatGPT Toolkit/); assert.match(source, /@version\s+1\.1\.10/); assert.equal(api.PREFIX, 'gpc.v1.');
+  assert.match(source, /@name\s+ChatGPT Toolkit/); assert.match(source, /@version\s+1\.1\.11/); assert.equal(api.PREFIX, 'gpc.v1.');
 });
 
 test('v1110: Window-targeted synthetic events remain untouched without passing a non-Node to contains', () => {

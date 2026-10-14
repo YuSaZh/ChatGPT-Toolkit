@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.10
+// @version      1.1.11
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -32,7 +32,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.10', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: '1.1.11', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -542,9 +542,12 @@
         if (method === 'MKCOL' && !cfg.approved) throw Error('请先确认在基础目录下建立同步目录');
         target = method === 'MKCOL' ? paths.directoryUrl : paths.fileUrl;
       } catch (e) { reject(e); return; }
-      let ended = false, handle, timer, streaming = false;
+      let ended = false, handle, timer, streaming = false, streamText, loadedResponse;
       const cancel = () => { end(Error('WebDAV 操作已取消')); try { handle?.abort(); } catch {} };
       const end = (err, result) => { if (ended) return; ended = true; clearTimeout(timer); signal?.removeEventListener('abort', cancel); err ? reject(err) : resolve(result); };
+      // onloadstart can expose the stream before status/headers are available.
+      // Its snapshot is never authoritative, even after the stream reaches EOF.
+      const finishStream = () => { if (loadedResponse && streamText !== undefined) end(null, { ...loadedResponse, responseText: streamText }); };
       if (signal?.aborted) { cancel(); return; }
       signal?.addEventListener('abort', cancel, { once: true });
       timer = setTimeout(() => { end(Error('WebDAV 请求超时，本机记录已保留')); try { handle?.abort(); } catch { /* ignore */ } }, timeout);
@@ -553,14 +556,17 @@
         handle = gmRequest({ method, url: target, headers: { ...headers, ...(auth ? { Authorization: auth } : {}) }, data,
           anonymous: true, redirect: 'error', fetch: true, nocache: true, responseType: 'stream',
           onloadstart: response => {
+            if (ended || streaming) return;
             if (!response.response || typeof response.response.getReader !== 'function') return;
             streaming = true;
             if ((response.finalUrl && response.finalUrl !== target) || response.status >= 300 && response.status < 400) { end(Error('拒绝重定向；请填写最终 HTTPS 地址')); try { handle?.abort(); } catch {} return; }
-            readBounded(response.response, MAX_IMPORT, timeout).then(text => end(null, { ...response, responseText: text }), () => { end(Error('WebDAV 响应超时或超过 5 MB；本机记录已保留')); try { handle?.abort(); } catch {} });
+            readBounded(response.response, MAX_IMPORT, timeout).then(text => { streamText = text; finishStream(); }, () => { end(Error('WebDAV 响应超时或超过 5 MB；本机记录已保留')); try { handle?.abort(); } catch {} });
           },
           onload: response => {
-            if (streaming) return;
-            if ((response.finalUrl && response.finalUrl !== target) || response.status >= 300 && response.status < 400) { end(Error('拒绝重定向；请填写最终 HTTPS 地址')); return; }
+            if (ended) return;
+            if ((response.finalUrl && response.finalUrl !== target) || response.status >= 300 && response.status < 400) { end(Error('拒绝重定向；请填写最终 HTTPS 地址')); try { handle?.abort(); } catch {} return; }
+            if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599) { end(Error('WebDAV 未收到有效 HTTP 响应；请检查 Tampermonkey 网络权限、网络连接或被拒绝的重定向，本机记录已保留')); try { handle?.abort(); } catch {} return; }
+            if (streaming) { loadedResponse = response; finishStream(); return; }
             if (typeof response.responseText === 'string' && new TextEncoder().encode(response.responseText).byteLength > MAX_IMPORT) { end(Error('远端文件超过 5 MB，已停止同步')); return; }
             if (response.status === 200 && typeof response.responseText !== 'string') { end(Error('脚本管理器未提供可读响应；请更新 Tampermonkey')); return; }
             end(null, response);

@@ -1,10 +1,20 @@
 # ChatGPT Toolkit 验证记录
 
-版本：1.1.10（实验预览）
+版本：1.1.11（实验预览）
 日期：2026-10-14
 运行时：Node.js v24.19.0
 
-## 1.1.10 已通过与验证限制
+## 1.1.11 已通过与验证限制
+
+- `node --test *.test.cjs`：336 项通过，0 失败、0 跳过。保留此前 322 项，新增 14 项 WebDAV 流式响应生命周期回归。
+- 主脚本及全部 `.cjs` 语法检查通过。独立审查另以 8 组只读模拟探针检查回调时序、最终状态、重定向、超时和限量读取，无阻塞项。
+- 在 1.1.10 基线上复现：`onloadstart` 为状态 0，空流 EOF 后才触发最终 201，旧版返回 0。新版必须同时得到最终 `onload` 与完整有界流；覆盖两种结束顺序、最终 ETag、空 MKCOL / PUT、405 已存在目录、401 / 403 / 409 / 500、最终状态 0、缺失回调、晚到错误 / 取消 / 重定向、超限和无流回退。
+- 集成回归覆盖状态 0 起始事件贯穿 MKCOL → GET → 条件 PUT，确认最终 ETag 用于 If-Match；真实失败停止后续 GET / PUT / 本机导入。保持 `anonymous: true`、`redirect: error`、独立计时器和原有网络调用点。
+- [Tampermonkey 文档](https://www.tampermonkey.net/documentation.php?q=GM_xmlhttpRequest)区分流开始与完成回调；[维护者历史讨论](https://github.com/Tampermonkey/tampermonkey/issues/1278#issuecomment-1004614835)确认 loadstart 在 readyState 1 触发。修复依据是回调生命周期，而非放开重定向或推断密码错误。
+- 真实 Windows / Tampermonkey、实际 WebDAV 服务、TLS / 代理 / 扩展权限及原生浏览器行为未验证；没有使用用户凭据或创建真实远端目录。合成复现不证明用户环境不存在其他问题。仅代码与模拟验证完成，不宣称真实服务同步成功。
+- 生产代码差异限于版本和 WebDAV 传输回调；ChatGPT 被动观察、输入隔离、计数及存储格式保持。没有新增权限、主动 ChatGPT 请求或自动重试网络路径。
+
+## 1.1.10 历史验证记录
 
 - `node --test *.test.cjs`：322 项通过，0 失败、0 跳过。保留原有 291 项，新增 20 项输入 / 表单生命周期和 11 项独立 WebDAV 自动拉取审查回归。
 - 主脚本及全部 `.cjs` 语法检查通过。
@@ -138,3 +148,9 @@ node --test *.test.cjs
 7f0a7ff335478729f110474af0d0523206c89db1f5c5dc5ac81e4870491f58b2
 ```
 
+
+1.1.11 脚本 SHA-256：
+
+```text
+2d8d3d2676457f0fce5e73c036a4d61950094490997682b05c2eb4c8022494fa
+```

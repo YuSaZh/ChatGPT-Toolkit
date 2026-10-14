@@ -61,7 +61,7 @@ test('settings merge is deterministic for two installations initial same id/time
 });
 test('stream transport reads successful JSON and enforces byte limit before completion',async()=>{
  let sent;const manager={scriptHandler:'Tampermonkey',version:'5.5.1'};
- const tx=api.createDavTransport(p=>{sent=p;queueMicrotask(()=>p.onloadstart({status:200,finalUrl:cfg.url,responseHeaders:'ETag: "stream"',response:new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('{"ok":true}'));c.close();}})}));return {abort(){}};},manager);
+ const tx=api.createDavTransport(p=>{sent=p;queueMicrotask(()=>{p.onloadstart({status:0,finalUrl:'',responseHeaders:'',response:new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('{"ok":true}'));c.close();}})});p.onload({status:200,finalUrl:cfg.url,responseHeaders:'ETag: "stream"'});});return {abort(){}};},manager);
  const result=await tx(cfg,'GET');assert.equal(sent.responseType,'stream');assert.equal(result.responseText,'{"ok":true}');
  let aborted=false;const huge=api.createDavTransport(p=>{queueMicrotask(()=>p.onloadstart({status:200,finalUrl:cfg.url,response:new ReadableStream({start(c){c.enqueue(new Uint8Array(5*1024*1024+1));c.close();}})}));return {abort(){aborted=true;}};},manager);
  await assert.rejects(huge(cfg,'GET'),/5 MB/);assert.equal(aborted,true);
