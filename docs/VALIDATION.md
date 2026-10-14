@@ -1,10 +1,21 @@
 # ChatGPT Toolkit 验证记录
 
-版本：1.1.9（实验预览）
-日期：2026-10-13
+版本：1.1.10（实验预览）
+日期：2026-10-14
 运行时：Node.js v24.19.0
 
-## 1.1.9 已通过与验证限制
+## 1.1.10 已通过与验证限制
+
+- `node --test *.test.cjs`：322 项通过，0 失败、0 跳过。保留原有 291 项，新增 20 项输入 / 表单生命周期和 11 项独立 WebDAV 自动拉取审查回归。
+- 主脚本及全部 `.cjs` 语法检查通过。
+- 新合成事件模型显式覆盖 closed Shadow DOM 的宿主重定向、窗口 / document 捕获与冒泡、窗口非 Node 目标，以及外部输入框 / 其他 Shadow DOM 不受影响。原 1.1.9 在同一模拟页面粘贴处理器下可复现错误，新实现通过；也明确测试更早窗口监听无法撤销的限制。
+- 覆盖 WebDAV URL / 用户名 / 密码 / select / checkbox，键盘、复制剪切粘贴、beforeinput / input、composition 事件不取消默认动作，IME Escape / legacy 229，面板关闭 / 再打开、节点恢复、异步成功 / 失败 / 切页 / 新草稿、原表单身份与设置冲突快照。
+- 独立同步测试覆盖无本机改动自动拉云端、所选间隔、重复合并、同步途中本机新记录与设置、失败记录降计数、PUT 失败不导入、测试配置不合并、打开同步页状态 / 入口刷新，以及 20,001 条且小于 5 MiB 的合并禁止上传。
+- `ui-v1110-smoke.cjs` 已新增并通过语法检查。一次普通 Chromium 启动仍以 `socket() failed: Operation not permitted` 退出，未进入页面断言；没有提高权限、绕过限制或记为通过。该测试保留真正 closed Shadow DOM，并准备浏览器原生键盘编辑流程；剪贴板和 IME 部分仍只是事件路由模拟。
+- Node 合成默认动作回调不等于浏览器原生编辑验证。真实 Tampermonkey / 当前 ChatGPT 页面、系统剪贴板、真实输入法组合、扩展注入时序和真实 WebDAV 服务均未验证。脚本 @run-at 不能保证早于所有站点窗口监听。
+- 保留 ChatGPT Toolkit 名称、namespace、下载 / 更新地址、`gpc.v1.`、v1 文件格式。未增加 ChatGPT 请求、自动发送、模型切换、PoW 求解或剪贴板读取；WebDAV 仍依赖已有明确授权配置。
+
+## 1.1.9 历史验证记录
 
 - 主脚本与全部 `.cjs` 语法检查通过。
 - `node --test *.test.cjs`：291 项全部通过，0 失败、0 跳过。保留此前 261 项，新增 21 项独立审查与 9 项实现侧 UI 回归。
@@ -121,9 +132,9 @@ node --test *.test.cjs
 
 如机器已安装 Playwright 和 Chromium，可另外运行 `node ui-smoke.cjs`、`node audit-bootstrap.cjs`、`node ui-send-smoke.cjs`、`node ui-v116-smoke.cjs`、`node ui-v117-smoke.cjs`、`node ui-v118-smoke.cjs`。这些脚本默认使用 `/usr/bin/chromium`；不同系统可修改脚本中的浏览器路径。它们仍是合成页面测试，不能替代实际扩展与 ChatGPT 页面验收。
 
-本版脚本 SHA-256：
+1.1.10 脚本 SHA-256：
 
 ```text
-a3203f11fc56c9361fae8f15f3cb6484f1652260703058016b3e2f8385236f7c
+7f0a7ff335478729f110474af0d0523206c89db1f5c5dc5ac81e4870491f58b2
 ```
 

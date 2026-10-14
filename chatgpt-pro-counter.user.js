@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.9
+// @version      1.1.10
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -32,7 +32,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.9', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: '1.1.10', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -82,6 +82,7 @@
   const MAX_BODY = 1024 * 1024;
   const MAX_STREAM = 256 * 1024;
   const MAX_IMPORT = 5 * 1024 * 1024;
+  const MAX_EVENTS = 20000;
   const STATES = new Set(['pending', 'accepted', 'failed', 'aborted', 'unknown', 'manual']);
   const OBSERVATIONS = new Set(['pending', 'http', 'metadata', 'done', 'handoff', 'bounded', 'unreadable', 'error', 'manual']);
   const uuid = () => crypto.randomUUID();
@@ -487,7 +488,7 @@
   function decodeImport(text) {
     if (typeof text !== 'string' || text.length > MAX_IMPORT) throw Error('文件过大，最多 5 MB');
     const obj = JSON.parse(text);
-    if (obj?.format !== 'chatgpt-pro-counter' || obj.version !== 1 || !Array.isArray(obj.events) || obj.events.length > 20000) throw Error('不是兼容的计数器备份');
+    if (obj?.format !== 'chatgpt-pro-counter' || obj.version !== 1 || !Array.isArray(obj.events) || obj.events.length > MAX_EVENTS) throw Error('不是兼容的计数器备份');
     return { settings: validSettings(obj.settings), events: mergeEvents([], obj.events) };
   }
   function webDavConfig(v) {
@@ -606,6 +607,7 @@
       if (options.testOnly) return { missing: response.status === 404, status: response.status };
       const here = local();
       const events = mergeEvents(here.events, remote?.events || []).filter(event => !event.ledger.startsWith('unassigned:'));
+      if (events.length > MAX_EVENTS) throw Error('合并记录超过 20,000 条上限，未上传；本机与远端均未改写，请先导出留存并人工整理');
       const merged = snapshot(remote ? newestSettings(here.settings, remote.settings) : here.settings, events);
       if (new TextEncoder().encode(JSON.stringify(merged)).byteLength > MAX_IMPORT) throw Error('合并文件超过 5 MB，未上传；请导出备份');
       check();
@@ -681,6 +683,25 @@
     let storedSettings = defaultSettings(), settings = storedSettings, records = [], root, host, hoverRoot, hoverHost, activeTrigger, collapsed = true, tab = 'home', notice = '', storageError = hasStorage ? '' : 'Tampermonkey 存储权限未就绪：当前仅临时显示，刷新后不会保留。请检查脚本权限再刷新。', observer;
     let hoverTimer, hoverHideTimer, panelDraft, nativeBindingTimer, panelReturnFocus, lastNativeAnchor, incrementHost, incrementTimer, incrementKey, storageAvailable = hasStorage, uiBound = false, uiReady = false;
     let refreshTimer, lastKeys = '', settingsSnapshot = '', syncBusy = false, syncStatus = '未启用 WebDAV', lastSyncAttempt = 0, configEpoch = 0, currentAbort = null;
+    // Register at document-start, before mount/storage work. Closed Shadow DOM
+    // retargets our fields to the non-editable host for page shortcut handlers.
+    // Root bubbling alone is too late for document/window capture listeners.
+    // Stop propagation only: native typing, paste, selection, undo and IME keep
+    // their browser defaults. Never inspect clipboard contents or redispatch.
+    const panelEditEvents = ['keydown', 'keypress', 'keyup', 'paste', 'copy', 'cut', 'beforeinput', 'input', 'compositionstart', 'compositionupdate', 'compositionend'];
+    function isolatePanelEdit(event) {
+      if (collapsed || !root || !host || (event.target !== host && (!event.target?.nodeType || !root.contains(event.target)))) return;
+      const field = root.activeElement;
+      if (!field?.matches('input,textarea,select') || field.disabled || ['hidden', 'file', 'button', 'submit', 'reset'].includes(field.getAttribute('type'))) return;
+      event.stopImmediatePropagation();
+      // These panel shortcuts would otherwise be stopped before our document
+      // handler. During composition Escape belongs to the IME, not the panel.
+      if (event.type === 'keydown' && !event.isComposing && event.keyCode !== 229) {
+        if (event.key === 'Escape') { closePanel(); hideHover(); }
+        else if (event.altKey && event.shiftKey && event.code === 'KeyP') { event.preventDefault(); closePanel(); }
+      }
+    }
+    for (const type of panelEditEvents) win.addEventListener(type, isolatePanelEdit, true);
     // Local appearance preference, deliberately outside the shared v1 ledger
     // schema: older sync peers cannot drop or overwrite it. Missing/invalid => Pro.
     let hoverMode = 'pro';
@@ -785,7 +806,7 @@
       const url = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' }));
       const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
     };
-    function scheduleRender() { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { updateHover(); if (root && (collapsed || !['settings', 'sync'].includes(tab))) render(); flushIncrement(); }, 150); }
+    function scheduleRender() { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { updateHover(); if (root) render(); flushIncrement(); }, 150); }
     const fmt = ms => new Date(ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
     const esc = str => String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const button = (action, label, klass = '') => `<button type="button" data-action="${action}" class="${klass}">${label}</button>`;
@@ -809,11 +830,28 @@
       .launcher{display:flex;justify-content:flex-end;margin-top:10px}.chip:before{content:'✦';color:var(--accent);font-size:15px;margin-right:3px}.chip small{font-size:10px}.hover-card{width:min(248px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;overflow-wrap:anywhere;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 42px #35245c24;color:var(--fg)}.hover-title{gap:4px 8px;font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center}.pro-label{font-weight:650;letter-spacing:.2px;color:var(--accent)}.hover-card .number{font-size:28px;line-height:1.2;margin:6px 0 0}.hover-card .number span{font-size:14px}.image-quota{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5;font-variant-numeric:tabular-nums}.hover-card .meter{margin:8px 0;height:5px}.hover-title>span,.hover-footer>span{min-width:0}.hover-footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 8px;font-size:11px;color:var(--muted)}.hover-footer button{flex-shrink:0;font-size:11px;color:var(--accent);border:none;background:transparent;padding:3px 0}.hover-error{font-size:11px;color:var(--warn);margin-top:8px}.panel{animation:appear .16s ease-out}.close{font-size:18px;line-height:1}.chip strong{font-variant-numeric:tabular-nums}.number{font-variant-numeric:tabular-nums}.fill{transition:width .22s ease}@keyframes appear{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@media(max-width:460px){.hover-card{width:min(248px,calc(100vw - 24px))}.panel{border-radius:14px}}@media(max-width:300px){.calibration{grid-template-columns:1fr 1fr}.calibration .initial{grid-column:1/-1;white-space:normal}.hover-title{flex-wrap:wrap}}
     `;
     function launcher(total) { return `<div class="launcher"><button type="button" data-action="expand" class="chip" aria-label="打开 Pro 计数器；${accountPending() ? '账号待识别' : `本机估算 ${total.used}/${settings.cap}`}" aria-expanded="${!collapsed}" aria-controls="gpc-panel">Pro <strong>${accountPending() ? '待识别' : `${total.used}/${settings.cap}`}</strong><small> ${storageAvailable ? '本机' : '权限异常'}</small></button></div>`; }
-    function render() {
+    function panelNotices() { return `${accountPending() ? `<div class="notice" role="status">当前账号待识别。新请求暂存未分配记录，不计入任何账号，也不上传 WebDAV；后续识别不会自动搬移。等待页面自然返回会话信息，或刷新页面。</div>` : ''}${account.enabled() && !accountPending() && records.some(event => event.ledger.startsWith('unassigned:')) ? `<div class="notice" role="status">另有 ${records.filter(event => event.ledger.startsWith('unassigned:')).length} 条未分配记录，未计入当前账号。可导出核对，或关闭自动识别后在设置中查看未分配账本；不会自动搬移。</div>` : ''}${notice ? `<div class="notice" role="status">${esc(notice)}</div>` : ''}${storageError ? `<div class="notice error" role="alert">${esc(storageError)}</div>` : ''}`; }
+    function render(resetForm = false) {
       if (!root) return;
       const focusedAction = root.activeElement?.getAttribute('data-action');
       const total = summarize(records, settings);
       updateHover();
+      // Keep the live form, focus, selection, native undo and composition state
+      // during asynchronous status paints. Do not refresh settingsSnapshot:
+      // saving an old form must still reject changed settings/account context.
+      const liveForm = !collapsed && root.querySelector(tab === 'settings' ? '#settings' : tab === 'sync' ? '#webdav' : '#no-form');
+      if (liveForm && !resetForm) {
+        const notices = root.querySelector('#gpc-notices'); if (notices) renderMarkup(notices, panelNotices());
+        const sync = root.querySelector('#sync-status'); if (sync) sync.textContent = `${syncStatus}${syncBusy ? ' · 正在处理…' : ''}`;
+        refreshAccountPreference();
+        const chip = root.querySelector('[data-action="expand"]');
+        if (chip) {
+          chip.setAttribute('aria-label', `打开 Pro 计数器；${accountPending() ? '账号待识别' : `本机估算 ${total.used}/${settings.cap}`}`);
+          chip.querySelector('strong').textContent = accountPending() ? '待识别' : `${total.used}/${settings.cap}`;
+          chip.querySelector('small').textContent = storageAvailable ? '本机' : '权限异常';
+        }
+        return;
+      }
       if (collapsed) { renderMarkup(root, `<style>${style}</style>${launcher(total)}`); if (focusedAction) root.querySelector(`[data-action="${focusedAction}"]`)?.focus(); return; }
       let body = '';
       if (tab === 'settings') {
@@ -822,7 +860,7 @@
         body = `<div class="display-setting"><label id="hover-label">悬浮卡显示</label><div class="segmented" role="group" aria-labelledby="hover-label"><button type="button" id="hover-pro" data-action="hover-pro" aria-pressed="${hoverMode === 'pro'}">仅选择 Pro 时</button><button type="button" id="hover-all" data-action="hover-all" aria-pressed="${hoverMode === 'all'}">所有模型</button></div><small id="hover-status" role="status">${hoverPreferenceHint()}</small></div><div class="display-setting"><label id="account-label">按当前账号自动切换账本</label><div class="segmented" role="group" aria-labelledby="account-label"><button type="button" data-action="account-off" id="account-off" aria-pressed="${!account.enabled()}">手动选择</button><button type="button" data-action="account-on" id="account-on" aria-pressed="${account.enabled()}">实验自动识别</button></div><small id="account-status" role="status">${accountPreferenceHint()}</small></div><form id="settings"><label for="cap">本周期上限（自定义，非官方额度）</label><input id="cap" type="number" min="1" max="1000000" value="${settings.cap}" required><label for="mode">统计方式</label><select id="mode"><option value="fixed"${settings.mode === 'fixed' ? ' selected' : ''}>固定七天周期</option><option value="rolling"${settings.mode === 'rolling' ? ' selected' : ''}>滚动最近七天</option></select><label for="anchor">固定周期锚点（你的浏览器当地时间）</label><input id="anchor" type="datetime-local" value="${local}" required><small>填入你确认的重置时间；每 168 小时一个周期。默认是安装当天零点。滚动模式忽略此项。</small><label for="calibrate">当前已用校准为（首次安装可填写）</label><input id="calibrate" type="number" min="0" max="1000000" placeholder="留空保留现值"><small>会添加一条校准记录，不删除历史；以保存后的统计方式计算差额。</small><label for="ledger">账本</label><select id="ledger"${account.enabled() ? ' disabled' : ''}>${[...new Set(['default', settings.ledger, ...records.map(e => e.ledger)])].map(id => `<option value="${esc(id)}"${id === settings.ledger ? ' selected' : ''}>${id === settings.ledger ? esc(settings.label) : id === 'default' ? '默认账本' : id.startsWith('unassigned:') ? `未分配 ${esc(id.slice(11, 19))}` : esc(id.slice(0, 16))}</option>`).join('')}<option value="__new">新建独立账本…</option></select><small>${account.enabled() ? '账本跟随本标签页识别到的登录用户。同一用户的不同工作区共用账本。' : '手动模式：换账号时请选择独立账本。'} 上限、统计方式和周期锚点仍是共用设置，需自行核对；不会自动推断各账号额度。</small><div class="actions"><button class="primary" type="submit">保存设置</button>${button('home', '取消')}</div></form><div class="foot">修改前自动保存本机备份。不同标签页设置冲突时会提醒刷新。</div>`;
       } else if (tab === 'sync') {
         const cfg = getDav(), davMode = cfg.version === 2 ? cfg.mode : cfg.url ? 'file' : 'base';
-        body = `<form id="webdav"><div class="callout">可选：把计数记录、模型标记和周期设置存到你自己的 WebDAV 文件。密码仅在本机 Tampermonkey 存储，不随备份导出；不是加密保险箱。</div><label for="dav-mode">地址模式</label><select id="dav-mode"><option value="base"${davMode === 'base' ? ' selected' : ''}>基础目录（自动建立同步目录）</option><option value="file"${davMode === 'file' ? ' selected' : ''}>完整文件地址（兼容旧配置）</option></select><label id="dav-url-label" for="dav-url">${davMode === 'base' ? 'HTTPS 基础目录' : 'HTTPS 文件完整地址'}</label><input id="dav-url" type="url" value="${esc(cfg.url)}" placeholder="${davMode === 'base' ? 'https://你的服务器/dav/' : 'https://你的服务器/dav/pro-counter.json'}" required autocomplete="off"><small id="dav-path-hint">${davMode === 'base' ? '自动在此地址下建立 ChatGPT-Toolkit/，同步文件为 data.json。' : '保留原文件；切换基础目录前请先同步旧文件并导出备份，不自动搬移远端历史。'}</small><label for="dav-user">用户名</label><input id="dav-user" value="${esc(cfg.username)}" autocomplete="off"><label for="dav-pass">密码 / 专用应用密码</label><input id="dav-pass" type="password" placeholder="${cfg.password ? '已保存；留空保留（更换服务器时会清除）' : '建议使用专用应用密码'}" autocomplete="new-password"><label for="dav-interval">自动同步（仅页面打开时）</label><select id="dav-interval">${[0, 5, 15, 30, 60].map(n => `<option value="${n}"${cfg.interval === n ? ' selected' : ''}>${n ? `每 ${n} 分钟` : '关闭，仅手动'}</option>`).join('')}</select><label><input id="dav-approved" type="checkbox" style="width:auto" ${cfg.approved ? 'checked' : ''}> 我同意按所选模式建立同步目录、上传计数记录和周期设置，并在本机保存凭据。</label><div class="actions"><button type="submit" class="primary">测试并保存</button>${button('sync-now', '立即同步')}${button('sync-off', '关闭自动同步')}${button('sync-clear', '清除本机凭据')}</div></form><div class="callout" role="status">${esc(syncStatus)}${syncBusy ? ' · 正在处理…' : ''}</div><div class="foot">需要 Tampermonkey 5.5.1+。安装时的任意域名网络权限仅用于你填写的 WebDAV。同步不包含聊天正文、Cookie、令牌或 WebDAV 密码。两台设备使用相同模式和地址。需支持强 ETag / 条件 PUT；不跟随重定向。周期设置按更新时间合并，请确保系统时间准确。</div>`;
+        body = `<form id="webdav"><div class="callout">可选：把计数记录、模型标记和周期设置存到你自己的 WebDAV 文件。密码仅在本机 Tampermonkey 存储，不随备份导出；不是加密保险箱。</div><label for="dav-mode">地址模式</label><select id="dav-mode"><option value="base"${davMode === 'base' ? ' selected' : ''}>基础目录（自动建立同步目录）</option><option value="file"${davMode === 'file' ? ' selected' : ''}>完整文件地址（兼容旧配置）</option></select><label id="dav-url-label" for="dav-url">${davMode === 'base' ? 'HTTPS 基础目录' : 'HTTPS 文件完整地址'}</label><input id="dav-url" type="url" value="${esc(cfg.url)}" placeholder="${davMode === 'base' ? 'https://你的服务器/dav/' : 'https://你的服务器/dav/pro-counter.json'}" required autocomplete="off"><small id="dav-path-hint">${davMode === 'base' ? '自动在此地址下建立 ChatGPT-Toolkit/，同步文件为 data.json。' : '保留原文件；切换基础目录前请先同步旧文件并导出备份，不自动搬移远端历史。'}</small><label for="dav-user">用户名</label><input id="dav-user" value="${esc(cfg.username)}" autocomplete="off"><label for="dav-pass">密码 / 专用应用密码</label><input id="dav-pass" type="password" placeholder="${cfg.password ? '已保存；留空保留（更换服务器时会清除）' : '建议使用专用应用密码'}" autocomplete="new-password"><label for="dav-interval">自动同步（仅页面打开时）</label><select id="dav-interval">${[0, 5, 15, 30, 60].map(n => `<option value="${n}"${cfg.interval === n ? ' selected' : ''}>${n ? `每 ${n} 分钟` : '关闭，仅手动'}</option>`).join('')}</select><label><input id="dav-approved" type="checkbox" style="width:auto" ${cfg.approved ? 'checked' : ''}> 我同意按所选模式建立同步目录、上传计数记录和周期设置，并在本机保存凭据。</label><div class="actions"><button type="submit" class="primary">测试并保存</button>${button('sync-now', '立即同步')}${button('sync-off', '关闭自动同步')}${button('sync-clear', '清除本机凭据')}</div></form><div id="sync-status" class="callout" role="status">${esc(syncStatus)}${syncBusy ? ' · 正在处理…' : ''}</div><div class="foot">需要 Tampermonkey 5.5.1+。安装时的任意域名网络权限仅用于你填写的 WebDAV。同步不包含聊天正文、Cookie、令牌或 WebDAV 密码。两台设备使用相同模式和地址。需支持强 ETag / 条件 PUT；不跟随重定向。周期设置按更新时间合并，请确保系统时间准确。</div>`;
       } else if (tab === 'log') {
         const proof = pow.current();
         const powStatus = `<div id="pow-status" class="callout" role="status">PoW 难度：${proof ? `<span class="pow-difficulty">${esc(proof.difficulty)}</span><br>是否要求：${proof.required === null ? '未知' : proof.required ? '是' : '否'} · 最近捕获 ${fmt(proof.observedAt)}` : '暂未捕获'}</div>`;
@@ -831,7 +869,7 @@
       } else {
         body = `<div class="eyebrow">${settings.mode === 'fixed' ? '本周期' : '最近七天'}已用 · 本机估算</div><div class="number">${accountPending() ? '待识别' : total.used}<span> / ${settings.cap}</span></div><div class="meter" role="progressbar" aria-label="本机估算已用" aria-valuemin="0" aria-valuemax="${Math.max(total.used, settings.cap)}" aria-valuenow="${accountPending() ? 0 : total.used}"><div class="fill" style="width:${accountPending() ? 0 : Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="row"><strong>估算剩余 ${accountPending() ? '待识别' : total.remaining}</strong><span class="meta">待确认 ${total.pending} · 失败/取消 ${total.failed}</span></div><div class="callout">${settings.mode === 'fixed' ? `下个周期：${fmt(total.next)}<br>锚点由你设置，不是服务端重置时间。` : '每条记录在 168 小时后移出统计窗口。'}${total.raw < 0 ? '<br><span class="warning">校准合计为负，已用暂显示 0，请复核记录。</span>' : ''}</div><div class="meta">已接收 Pro ${accountPending() ? '待识别' : total.pro} · 手动校准 ${total.adjustment >= 0 ? '+' : ''}${total.adjustment}</div><div class="actions calibration" role="group" aria-label="手动校准">${button('plus', '+1 校正')}${button('minus', '−1 校正')}${button('settings', '初始用量 / 设置', 'initial')}</div><div class="actions secondary">${button('export', '导出')}${button('import', '导入合并')}${button('backup', '最近备份', 'ghost')}</div><div class="foot">本机优先 · ${getDav().enabled ? 'WebDAV 已配置' : 'WebDAV 未启用'} · 非官方余额<br>${esc(settings.label)} · ${observer?.healthy() ? (observer.observed() ? '观察器已捕获请求' : '观察器已安装，等待新请求') : '观察器可能被覆盖，请刷新页面'}${account.enabled() ? '<br>按登录用户分账；上限与周期设置共用。' : ''}${getDav().enabled ? `<br>${esc(syncStatus)}${Math.max(settings.updated, ...records.map(e => e.updated)) > Number(gmGet(`${PREFIX}lastSync`, 0)) ? '<br>有待同步的新记录；断网时保留在本机。' : ''}` : ''}</div>`;
       }
-      renderMarkup(root, `<style>${style}</style><section id="gpc-panel" class="panel" role="dialog" aria-label="ChatGPT Toolkit"><header><h1>ChatGPT Toolkit<span>LOCAL</span></h1><button type="button" data-action="collapse" class="ghost close" aria-label="关闭计数器">×</button></header><nav>${button('home', '概览', tab === 'home' ? 'active' : '')}${button('log', '记录', tab === 'log' ? 'active' : '')}${button('settings', '设置', tab === 'settings' ? 'active' : '')}${button('sync', '同步', tab === 'sync' ? 'active' : '')}</nav>${accountPending() ? `<div class="notice" role="status">当前账号待识别。新请求暂存未分配记录，不计入任何账号，也不上传 WebDAV；后续识别不会自动搬移。等待页面自然返回会话信息，或刷新页面。</div>` : ''}${account.enabled() && !accountPending() && records.some(event => event.ledger.startsWith('unassigned:')) ? `<div class="notice" role="status">另有 ${records.filter(event => event.ledger.startsWith('unassigned:')).length} 条未分配记录，未计入当前账号。可导出核对，或关闭自动识别后在设置中查看未分配账本；不会自动搬移。</div>` : ''}${notice ? `<div class="notice" role="status">${esc(notice)}</div>` : ''}${storageError ? `<div class="notice error" role="alert">${esc(storageError)}</div>` : ''}<div class="body">${body}</div><input type="file" id="import" accept="application/json,.json" hidden></section>${launcher(total)}`);
+      renderMarkup(root, `<style>${style}</style><section id="gpc-panel" class="panel" role="dialog" aria-label="ChatGPT Toolkit"><header><h1>ChatGPT Toolkit<span>LOCAL</span></h1><button type="button" data-action="collapse" class="ghost close" aria-label="关闭计数器">×</button></header><nav>${button('home', '概览', tab === 'home' ? 'active' : '')}${button('log', '记录', tab === 'log' ? 'active' : '')}${button('settings', '设置', tab === 'settings' ? 'active' : '')}${button('sync', '同步', tab === 'sync' ? 'active' : '')}</nav><div id="gpc-notices">${panelNotices()}</div><div class="body">${body}</div><input type="file" id="import" accept="application/json,.json" hidden></section>${launcher(total)}`);
       if (focusedAction) root.querySelector(`[data-action="${focusedAction}"]`)?.focus();
     }
     function manual(delta, at = Date.now()) {
@@ -849,7 +887,7 @@
       try {
         gmSet(`${PREFIX}ui.autoAccount`, enabled); account.setEnabled(enabled); applyAccountLedger();
         // Switching account mode intentionally discards an unrelated form draft.
-        panelDraft = null; render();
+        panelDraft = null; render(true);
       } catch { notice = '自动识别设置未保存：本机存储不可用。'; render(); }
     }
     function hoverPreferenceHint() { return hasStorage ? '悬停或聚焦时显示，非始终展开。立即保存，仅本机生效。' : '悬停或聚焦时显示，非始终展开。存储不可用，仅本页临时生效。'; }
@@ -871,12 +909,12 @@
           const action = b.dataset.action; notice = '';
           if (action === 'account-on' || action === 'account-off') { setAccountMode(action === 'account-on'); return; }
           if (action === 'hover-pro' || action === 'hover-all') { setHoverMode(action === 'hover-all' ? 'all' : 'pro'); return; }
-          if (['home', 'log', 'settings', 'sync'].includes(action)) { load(); tab = action; collapsed = false; render(); return; }
+          if (['home', 'log', 'settings', 'sync'].includes(action)) { load(); tab = action; collapsed = false; render(true); return; }
           if (action === 'collapse' || action === 'expand') { if (action === 'expand') openPanel(); else closePanel(); return; }
           if (action === 'plus' || action === 'minus') { load(); manual(action === 'plus' ? 1 : -1); render(); return; }
           if (action === 'sync-now') { void doSync(); return; }
-          if (action === 'sync-off') { const cfg = getDav(); gmSet(`${PREFIX}webdav`, { ...cfg, interval: 0 }); syncStatus = '自动同步已关闭；仍可手动同步'; }
-          if (action === 'sync-clear') { if (!win.confirm('清除本机保存的 WebDAV 地址与凭据？远端文件和本机计数记录保留。')) return; configEpoch++; currentAbort?.abort(); gmSet(`${PREFIX}webdav`, { version: 2, mode: 'base', url: '', username: '', password: '', interval: 0, enabled: false, tested: false, approved: false, revision: uuid() }); syncStatus = '已清除本机 WebDAV 配置'; }
+          if (action === 'sync-off') { const cfg = getDav(); gmSet(`${PREFIX}webdav`, { ...cfg, interval: 0 }); syncStatus = '自动同步已关闭；仍可手动同步'; const interval = root.querySelector('#dav-interval'); if (interval) interval.value = '0'; }
+          if (action === 'sync-clear') { if (!win.confirm('清除本机保存的 WebDAV 地址与凭据？远端文件和本机计数记录保留。')) return; configEpoch++; currentAbort?.abort(); gmSet(`${PREFIX}webdav`, { version: 2, mode: 'base', url: '', username: '', password: '', interval: 0, enabled: false, tested: false, approved: false, revision: uuid() }); syncStatus = '已清除本机 WebDAV 配置'; render(true); return; }
           if (action === 'export') { load(); download(exportObject(), `chatgpt-pro-counter-${new Date().toISOString().slice(0, 10)}.json`); notice = '已生成本机记录导出文件'; }
           if (action === 'import') { root.querySelector('#import').click(); return; }
           if (action === 'backup') {
@@ -931,6 +969,7 @@
       if (syncBusy) return;
       try {
         if (!storageAvailable) throw Error('本机存储不可用，WebDAV 已停用。请检查 Tampermonkey 权限后刷新。');
+        const submittedForm = root.querySelector('#webdav');
         const prev = getDav(), priorConfig = JSON.stringify(prev), q = id => root.querySelector(`#${id}`).value;
         const url = q('dav-url').trim(), username = q('dav-user'), mode = q('dav-mode');
         const approved = root.querySelector('#dav-approved').checked;
@@ -942,6 +981,14 @@
         await syncWebDav(cfg, { request: transport }, { testOnly: true, signal: currentAbort.signal, check: () => { if (configEpoch !== epoch || JSON.stringify(getDav()) !== priorConfig) throw Error('配置已在本页或其他标签页改变；操作取消'); } });
         if (configEpoch !== epoch || JSON.stringify(getDav()) !== priorConfig) throw Error('配置已在本页或其他标签页改变；操作取消');
         gmSet(`${PREFIX}webdav`, { ...cfg, tested: true, revision: uuid() });
+        // Do not erase newer edits or disturb an active edit/composition when a
+        // delayed test completes. Successful, inactive submitted fields can be
+        // normalized/cleared without replacing the live form.
+        if (root.querySelector('#webdav') === submittedForm) {
+          const urlField = root.querySelector('#dav-url'), passwordField = root.querySelector('#dav-pass');
+          if (urlField.value.trim() === url && root.activeElement !== urlField) urlField.value = cfg.url;
+          if (passwordField.value === password && root.activeElement !== passwordField) passwordField.value = '';
+        }
         lastSyncAttempt = Date.now(); syncStatus = cfg.mode === 'base' ? '配置已保存；读取测试通过。首次同步将合并或建立 data.json，文件写权限在同步时验证。' : '读取测试通过；原文件配置已保存。首次同步将合并或建立文件，写权限在同步时验证。';
       } catch (error) { syncStatus = error.message; }
       finally { syncBusy = false; render(); }
@@ -956,7 +1003,7 @@
         if (!cfg.enabled || !cfg.tested || !cfg.approved) throw Error('请先在“同步”中测试并保存配置');
         const epoch = configEpoch, priorConfig = JSON.stringify(rawConfig); currentAbort = new AbortController();
         const sameDestination = () => { if (!storageAvailable) throw Error('本机存储不可用，已取消同步写入。'); const current = getDav(); if (epoch !== configEpoch || JSON.stringify(current) !== priorConfig || !current.enabled || !current.approved) throw Error('同步配置已改变；操作取消'); };
-        syncBusy = true; lastSyncAttempt = Date.now(); syncStatus = '正在合并 WebDAV 记录'; if (!auto) render();
+        syncBusy = true; lastSyncAttempt = Date.now(); syncStatus = '正在合并 WebDAV 记录'; render();
         const result = await syncWebDav(cfg, { request: transport,
           local: () => { load(); return syncObject(); }, backup: () => backup('同步前'),
           apply: merged => {
@@ -967,7 +1014,7 @@
         syncStatus = `同步成功 ${fmt(Date.now())} · 合并 ${result.count} 条记录`;
         gmSet(`${PREFIX}lastSync`, lastSyncAttempt);
       } catch (error) { syncStatus = error.message; }
-      finally { syncBusy = false; if (!auto || !['settings', 'sync'].includes(tab)) render(); }
+      finally { syncBusy = false; render(); }
     }
     function closePanel(restoreFocus = true) {
       if (collapsed) return;
@@ -1239,6 +1286,7 @@
       // The native trigger's click/keyboard events are never canceled or replaced.
       document.addEventListener('click', event => { const el = nativeTrigger(event.target); if (el) { lastNativeAnchor = el; hideHover(); } }, true);
       document.addEventListener('keydown', event => {
+        if (event.isComposing || event.keyCode === 229) return;
         if (event.key === 'Escape') { if (!collapsed) closePanel(); hideHover(); }
         if (event.altKey && event.shiftKey && event.code === 'KeyP') { event.preventDefault(); if (collapsed) openPanel(); else closePanel(); }
       });
@@ -1311,11 +1359,11 @@
     try { new MutationObserver(() => { if (quotaPage !== win.location.href) invalidateImageQuota(); if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'style', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target'] }); } catch { /* interval below also recovers */ }
     setInterval(() => {
       const mounted = safeMount(); const before = lastKeys, s = settings.id; load();
-      if (mounted && (collapsed || !['settings', 'sync'].includes(tab))) { if (before !== lastKeys || s !== settings.id || !document.hidden) render(); }
+      if (mounted) { if (before !== lastKeys || s !== settings.id || !document.hidden) render(); }
       bindNativeControls(); if (activeTrigger) updateHover(); else if (quotaPage !== win.location.href || document.hidden) invalidateImageQuota(); positionHover();
     }, 5000);
     setInterval(() => { try { const cfg = getDav(); const since = Math.max(lastSyncAttempt, Number(gmGet(`${PREFIX}lastSync`, 0))); if (storageAvailable && cfg.enabled && cfg.tested && cfg.approved && cfg.interval > 0 && Date.now() - since >= cfg.interval * 60000) void doSync(true); } catch { /* no optional-sync failure may remove the UI */ } }, 15000);
-    win.addEventListener('focus', () => { const mounted = safeMount(); load(); if (mounted && (collapsed || !['settings', 'sync'].includes(tab))) render(); });
+    win.addEventListener('focus', () => { const mounted = safeMount(); load(); if (mounted) render(); });
     diagnostics?.mark('ready');
   }
   return { WEEK, PREFIX, modelKind, defaultSettings, validSettings, validEvent, windowFor, kindFor, mergeEvents, grouped, summarize,
