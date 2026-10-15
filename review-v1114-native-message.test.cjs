@@ -171,12 +171,12 @@ test('ordinary hide/show clears owned cache and restores direct props without pe
 });
 test('bounded parent traversal omits excessive depth rather than scanning whole state', () => {
   const s = setup(); let previous = s.component;
-  for (let i = 0; i < 90; i++) { const parent = { return: s.root, child: previous, memoizedProps: {} }; previous.return = parent; previous = parent; }
+  for (let i = 0; i < 300; i++) { const parent = { return: s.root, child: previous, memoizedProps: {} }; previous.return = parent; previous = parent; }
   s.root.child = previous; s.render(); assert.equal(s.badge(), null);
 });
-test('bounded sibling validation omits an excessive sibling list', () => {
+test('bounded committed-tree index omits nodes beyond its total traversal budget', () => {
   const s = setup(); let first = s.component;
-  for (let i = 0; i < 501; i++) first = { return: s.root, sibling: first };
+  for (let i = 0; i < 24001; i++) first = { return: s.root, sibling: first };
   s.root.child = first; s.render(); assert.equal(s.badge(), null);
 });
 test('render diagnostic reports only fixed labels and counts', () => {

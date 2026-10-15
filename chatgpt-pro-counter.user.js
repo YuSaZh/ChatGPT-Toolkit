@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.15
+// @version      1.1.16
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -10,7 +10,7 @@
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @run-at       document-start
-// @sandbox      JavaScript
+// @sandbox      raw
 // @grant        unsafeWindow
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -32,7 +32,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.15', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: '1.1.16', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null, inspectStorage: null, inspectMessageInfo: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -48,7 +48,7 @@
       show() {
         try { diagnostics.inspectHover?.(); } catch (error) { diagnostics.fail('hover-diagnostics', error); }
         try { Object.assign(state, diagnostics.inspectMessageInfo?.()); } catch (error) { diagnostics.fail('message-diagnostics', error); }
-        const text = ['Pro 计数器启动诊断', `脚本版本: ${state.version}`, `启动阶段: ${state.phase}`, `页面检查: ${state.frame}`, `存储接口: ${state.storage}`, `界面状态: ${state.ui}`, `观察器: ${state.observer}`, `消息信息: ${state.messageEnabled || 'unchecked'}`, `消息节点: ${state.messageNodes || 0}`, `网络消息元数据: ${state.messageCached || 0}`, `原生已提交路径: ${state.messageFiberPaths || 0}`, `原生消息属性: ${state.messagePropSources || 0}`, `新版消息组件: ${state.messageItemSources || 0}`, `已加载消息快照: ${state.messageStoreSources || 0}`, `原生消息元数据: ${state.messageNative || 0}`, `账号边界隔离节点: ${state.messageFenced || 0}`, `消息标签: ${state.messageBadges || 0}`, `菜单接口: ${state.menu}`, `悬停监听: ${state.hoverListeners}`, `可见输入框: ${state.hoverEditors}`, `可见模型标记: ${state.hoverMarkers}`, `可见发送锚点: ${state.hoverSends}`, `最近悬停事件: ${state.hoverEvent}`, `最近控件匹配: ${state.hoverMatch}`, `最近输入框范围: ${state.hoverScope}`, `浮卡状态: ${state.hoverCard}`, `最近显示检查: ${state.hoverPaint}`, `document.readyState: ${document.readyState}`, `近期错误: ${state.errors.length ? state.errors.join('\n') : '无'}`, '此报告不读取聊天内容、计数记录或 WebDAV 凭据。'].join('\n');
+        const text = ['Pro 计数器启动诊断', `脚本版本: ${state.version}`, `启动阶段: ${state.phase}`, `页面检查: ${state.frame}`, `存储接口: ${state.storage}`, `界面状态: ${state.ui}`, `观察器: ${state.observer}`, `消息信息: ${state.messageEnabled || 'unchecked'}`, `消息节点: ${state.messageNodes || 0}`, `网络消息元数据: ${state.messageCached || 0}`, `原生已提交路径: ${state.messageFiberPaths || 0}`, `原生消息属性: ${state.messagePropSources || 0}`, `消息页面范围: ${state.messagePage || 'unchecked'}`, `原始页面锚点: ${state.messageDomAnchors || 0}`, `React 属性宿主: ${state.messageReactHosts || 0}`, `React 提交根: ${state.messageReactRoots || 0}`, `已提交结构节点: ${state.messageCommittedFibers || 0}`, `新版消息组件: ${state.messageItemSources || 0}`, `已加载消息快照: ${state.messageStoreSources || 0}`, `原生消息元数据: ${state.messageNative || 0}`, `账号边界隔离节点: ${state.messageFenced || 0}`, `消息标签: ${state.messageBadges || 0}`, `菜单接口: ${state.menu}`, `悬停监听: ${state.hoverListeners}`, `可见输入框: ${state.hoverEditors}`, `可见模型标记: ${state.hoverMarkers}`, `可见发送锚点: ${state.hoverSends}`, `原始模型标记: ${state.hoverRawMarkers || 0}`, `原始发送按钮: ${state.hoverRawSends || 0}`, `原始语音开始按钮: ${state.hoverRawVoices || 0}`, `最近悬停事件: ${state.hoverEvent}`, `最近控件匹配: ${state.hoverMatch}`, `最近输入框范围: ${state.hoverScope}`, `浮卡状态: ${state.hoverCard}`, `最近显示检查: ${state.hoverPaint}`, `document.readyState: ${document.readyState}`, `近期错误: ${state.errors.length ? state.errors.join('\n') : '无'}`, '此报告不读取聊天内容、计数记录或 WebDAV 凭据。'].join('\n');
         try { if (typeof window.alert === 'function') window.alert(text); else console.info(text); } catch { /* retain the return value for diagnostics */ }
         return text;
       }
@@ -631,35 +631,83 @@
     }
     return [];
   }
+  // React bailouts may reuse a child list without rewriting each child's return
+  // pointer. Return links can locate the root, but cannot prove current ancestry.
+  // Build canonical parent links by walking root.current forward exactly once.
+  function createCommittedMessageIndex(doc) {
+    const parents = new WeakMap(), hosts = new WeakMap(), members = new WeakSet(), fibers = [];
+    const anchors = '[data-message-id],[data-turn-key],[data-user-message-bubble],[data-content-search-turn-key],[data-chatgpt-conversation-selection-target],[data-app-action-timeline-scroll],main';
+    const marked = Array.from(doc.querySelectorAll(anchors)).slice(-600);
+    // The page can mount independent React roots. A widget's root must not hide
+    // the conversation root, and a non-React <main> must not disable fallback.
+    const seeds = [...new Set([...marked, ...Array.from(doc.querySelectorAll('div,article,section')).slice(0,1500)])];
+    const roots = new Set(), located = new WeakMap();
+    let attachedCount = 0;
+    for (const element of seeds) {
+      let attached;
+      try {
+        const keys = Object.getOwnPropertyNames(element);
+        if (keys.length > 200) continue;
+        const key = keys.find(key => key.startsWith('__reactFiber$') || key.startsWith('__reactContainer$'));
+        attached = key && dataProperty(element, key);
+      } catch { continue; }
+      if (!attached || typeof attached !== 'object') continue;
+      attachedCount++;
+      const seen = new Set(), path = [];
+      let current = null;
+      for (let node = attached, depth = 0; node && typeof node === 'object' && depth < 256 && !seen.has(node); node = dataProperty(node, 'return'), depth++) {
+        if (located.has(node)) { current = located.get(node); break; }
+        seen.add(node); path.push(node);
+        const root = dataProperty(node, 'stateNode'), candidate = dataProperty(root, 'current');
+        if (dataProperty(node, 'tag') === 3 && candidate && dataProperty(candidate, 'stateNode') === root) { current = candidate; break; }
+      }
+      // An unresolved truncated path may be resolved from a shallower host later.
+      if (current) { for (const node of path) located.set(node, current); roots.add(current); }
+      if (roots.size >= 24) break;
+    }
+    const stack = [...roots].reverse().map(fiber => ({ fiber, parent: null, depth: 0 }));
+    let steps = 0;
+    while (stack.length && ++steps <= 24000) {
+      const { fiber, parent, depth } = stack.pop();
+      if (!fiber || typeof fiber !== 'object' || members.has(fiber) || depth > 256) continue;
+      members.add(fiber); parents.set(fiber, parent); fibers.push(fiber);
+      const sibling = dataProperty(fiber, 'sibling'); if (sibling && parent) stack.push({ fiber: sibling, parent, depth });
+      const props = dataProperty(fiber, 'memoizedProps'), tag = dataProperty(fiber, 'tag');
+      if (([22,23].includes(tag) && dataProperty(fiber, 'memoizedState') != null) || dataProperty(props, 'mode') === 'hidden') continue;
+      const element = dataProperty(fiber, 'stateNode');
+      if (tag === 5 && element?.nodeType === 1 && element.isConnected) hosts.set(element, fiber);
+      const child = dataProperty(fiber, 'child'); if (child) stack.push({ fiber: child, parent: fiber, depth: depth + 1 });
+    }
+    return {
+      count: fibers.length, anchors: marked.length, attached: attachedCount, roots: roots.size,
+      has: fiber => members.has(fiber),
+      boundaries(conversation) {
+        const found = fibers.filter(fiber => {
+          const props = dataProperty(fiber, 'memoizedProps');
+          return Array.isArray(dataProperty(props, 'renderedTurns')) && (!conversation || [dataProperty(props, 'conversationId'), dataProperty(props, 'browserConversationId')].includes(conversation));
+        });
+        return found.length ? found : [...roots];
+      },
+      chain(element) {
+        const chain = [];
+        for (let fiber = hosts.get(element); fiber && chain.length <= 256; fiber = parents.get(fiber)) chain.push(fiber);
+        return roots.has(chain.at(-1)) ? chain : [];
+      }
+    };
+  }
   // The current frontend renders item/assistantItem components rather than the
   // old DOM ID/role pair. Discover their committed host nodes, then read only
   // materialized React store snapshots. No getSnapshot, scope.get, watch,
   // component, module factory, signal or other application function is called.
-  function currentItemTargets(doc, conversation = '') {
-    const roots = new Set(), targets = new Map();
-    const anchors = '[data-message-id],[data-turn-key],[data-user-message-bubble],[data-content-search-turn-key],[data-chatgpt-conversation-selection-target],[data-app-action-timeline-scroll],main';
-    const seeds = Array.from(doc.querySelectorAll(anchors)).slice(-600);
-    // A DOM spelling change must not silently disable the new component path.
-    // This fallback reads element properties only, never text or form values.
-    if (!seeds.length) seeds.push(...Array.from(doc.querySelectorAll('div,article,section')).slice(0,1500));
-    let fallbackRoot = null;
-    for (const element of seeds) {
-      const chain = currentMessageAncestors(element);
-      const boundary = chain.find(fiber => {
-        const props = dataProperty(fiber, 'memoizedProps');
-        return Array.isArray(dataProperty(props, 'renderedTurns')) && (!conversation || [dataProperty(props, 'conversationId'), dataProperty(props, 'browserConversationId')].includes(conversation));
-      });
-      if (boundary) { roots.add(boundary); break; }
-      fallbackRoot ||= chain.at(-1);
-    }
-    if (!roots.size && fallbackRoot) roots.add(fallbackRoot);
+  function currentItemTargets(doc, conversation = '', index = createCommittedMessageIndex(doc)) {
+    const roots = new Set(index.boundaries(conversation)), targets = new Map();
     const hidden = fiber => ([22,23].includes(dataProperty(fiber, 'tag')) && dataProperty(fiber, 'memoizedState') != null) || dataProperty(dataProperty(fiber, 'memoizedProps'), 'mode') === 'hidden';
     function hostOf(component, id, role) {
       const stack = [dataProperty(component, 'child')], seen = new Set();
       let count = 0;
       while (stack.length && ++count <= 300) {
         const fiber = stack.pop();
-        if (!fiber || typeof fiber !== 'object' || seen.has(fiber)) continue;
+        if (!fiber || typeof fiber !== 'object' || seen.has(fiber) || !index.has(fiber)) continue;
         seen.add(fiber);
         const sibling = dataProperty(fiber, 'sibling'); if (sibling) stack.push(sibling);
         if (hidden(fiber)) continue;
@@ -680,7 +728,7 @@
     const seen = new Set(), stack = [...roots];
     while (stack.length && ++count <= 24000) {
       const fiber = stack.pop();
-      if (!fiber || typeof fiber !== 'object' || seen.has(fiber)) continue;
+      if (!fiber || typeof fiber !== 'object' || seen.has(fiber) || !index.has(fiber)) continue;
       seen.add(fiber);
       const sibling = dataProperty(fiber, 'sibling'); if (sibling && !roots.has(fiber)) stack.push(sibling);
       if (hidden(fiber)) continue;
@@ -698,7 +746,7 @@
       if (!id || !conversation) continue;
       const element = hostOf(fiber, id, role);
       if (!element) continue;
-      const chain = currentMessageAncestors(element);
+      const chain = index.chain(element);
       if (!chain.includes(fiber)) continue;
       const key = [conversation, id, role].join('\0'), prior = targets.get(key);
       if (prior && (prior.assistant || !assistant)) continue;
@@ -717,11 +765,11 @@
       if (!identities) { identities = new Set(); blockedNodes.set(element, identities); }
       identities.add([id, role].join('\0'));
     }
-    let report = {}, itemTargets = [];
+    let report = {}, itemTargets = [], index = null;
     const path = () => { try { return new URL(page()).origin + new URL(page()).pathname; } catch { return ''; } };
     function sources(element) {
       const result = [];
-      const chain = currentMessageAncestors(element);
+      const chain = index?.chain(element) || currentMessageAncestors(element);
       if (chain.length) report.messageFiberPaths = (report.messageFiberPaths || 0) + 1;
       for (const fiber of chain) {
         const props = dataProperty(fiber, 'memoizedProps');
@@ -746,11 +794,14 @@
     }
     return {
       begin(enabled = true) {
-        report = { messageFiberPaths: 0, messagePropSources: 0, messageFenced: 0, messageItemSources: 0, messageStoreSources: 0 };
-        itemTargets = enabled && conversationPage(path()) ? currentItemTargets(doc, conversationPage(path())) : [];
+        report = { messageFiberPaths: 0, messagePropSources: 0, messageFenced: 0, messageItemSources: 0, messageStoreSources: 0, messagePage: conversationPage(path()) ? 'conversation' : 'not-conversation', messageCommittedFibers: 0, messageDomAnchors: 0, messageReactHosts: 0, messageReactRoots: 0 };
+        index = enabled && conversationPage(path()) ? createCommittedMessageIndex(doc) : null;
+        report.messageCommittedFibers = index?.count || 0;
+        report.messageDomAnchors = index?.anchors || 0; report.messageReactHosts = index?.attached || 0; report.messageReactRoots = index?.roots || 0;
+        itemTargets = enabled && conversationPage(path()) ? currentItemTargets(doc, conversationPage(path()), index) : [];
       },
       targets: () => itemTargets,
-      end() { itemTargets = itemTargets.map(({ element, id, role }) => ({ element, id, role })); },
+      end() { index = null; itemTargets = itemTargets.map(({ element, id, role }) => ({ element, id, role })); },
       report: () => ({ ...report }),
       invalidate() {
         sourceEpoch++;
@@ -1204,6 +1255,9 @@
     diagnostics?.mark('frame-check');
     const win = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     if (!win || win.top !== win.self) { diagnostics?.mark('skipped', { frame: win ? 'not-top-window' : 'missing-window' }); return; }
+    // React expandos belong to the page's DOM realm. Use the same page document
+    // as unsafeWindow; keep GM storage APIs inside this userscript closure.
+    const document = win.document || window.document;
     // Public boolean guard only; never bridge storage or credentials across scripts.
     // It protects repeated v1.1.9 injections and an already-mounted older copy.
     if (win.__chatgptToolkitActiveV1 || document.getElementById('chatgpt-pro-local-counter')) { diagnostics?.mark('duplicate-skipped', { frame: 'top-window' }); return; }
@@ -1721,17 +1775,22 @@
       visit(el);
       return text.replace(/\s+/g, ' ').trim();
     }
+    function voiceStartControl(el) {
+      // The empty composer's conversation launcher is distinct from dictation,
+      // recording and in-call controls. Do not match generic voice labels.
+      return el.matches('button[type="button"].size-token-button-composer') && /^(?:start voice(?: mode| chat| conversation)?|开始语音(?:聊天|对话)?|開始語音(?:聊天|對話)?)$/i.test((el.getAttribute('aria-label') || '').trim());
+    }
     function selectionScope(trigger) {
       const known = composerFor(trigger) || trigger.closest(composerSelector);
       if (known) return known;
-      // A reported native Send + explicit model marker can share a plain-div
+      // A native Send/voice-start + explicit model marker can share a plain-div
       // shell even before an editor mounts. Never widen to the page/main region.
       for (let scope = trigger.parentElement, depth = 0; scope && depth < 4; scope = scope.parentElement, depth++) {
         if (scope === document.body || scope === document.documentElement || scope.matches('main,article,[role="main"]') || scope.closest(excludedRegion)) break;
         const markers = [...scope.querySelectorAll(modelMarkerSelector)].filter(el => visibleControl(el) && !el.closest(excludedRegion));
-        const sends = [...scope.querySelectorAll('button,[role="button"]')].filter(el => visibleControl(el) && (/^(?:send-button|composer-send-button|composer-submit-button)$/.test(el.getAttribute('data-testid') || '') || el.id === 'composer-submit-button' || (el.matches('button[type="submit"].size-token-button-composer') && /^(?:send(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)$/i.test(el.getAttribute('aria-label') || ''))));
-        if (markers.length !== 1 || sends.length !== 1 || [...scope.querySelectorAll(composerSelector)].length) continue;
-        const model = markers[0].getBoundingClientRect(), send = sends[0].getBoundingClientRect();
+        const actions = [...scope.querySelectorAll('button,[role="button"]')].filter(el => visibleControl(el) && (/^(?:send-button|composer-send-button|composer-submit-button)$/.test(el.getAttribute('data-testid') || '') || el.id === 'composer-submit-button' || (el.matches('button[type="submit"].size-token-button-composer') && /^(?:send(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)$/i.test(el.getAttribute('aria-label') || '')) || voiceStartControl(el)));
+        if (markers.length !== 1 || actions.length !== 1 || [...scope.querySelectorAll(composerSelector)].length) continue;
+        const model = markers[0].getBoundingClientRect(), send = actions[0].getBoundingClientRect();
         if (Math.abs(model.top - send.top) <= 80 && Math.abs(model.right - send.left) <= 240) return scope;
       }
       return null;
@@ -1771,7 +1830,9 @@
         if (el.closest(excludedRegion)) { detail.match = 'outside-composer'; detail.scope = 'excluded-region'; continue; }
         const text = controlText(el);
         const label = [el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid'), text].filter(Boolean).join(' ').trim();
-        if (/voice|microphone|(?:^|\W)mic(?:\W|$)|speech|audio|dictat|stop|pause|record|语音|語音|麦克风|麥克風|听写|聽寫|录音|錄音|朗读|朗讀|停止|暂停|暫停|upgrade|subscribe|升级|升級/i.test(label)) { detail.match = 'excluded-control'; return finish(null); }
+        const startVoice = voiceStartControl(el);
+        if (/microphone|(?:^|\W)mic(?:\W|$)|speech|audio|dictat|stop|pause|record|麦克风|麥克風|听写|聽寫|录音|錄音|朗读|朗讀|停止|暂停|暫停|upgrade|subscribe|升级|升級/i.test(label) || (!startVoice && /voice|语音|語音/i.test(label))) { detail.match = 'excluded-control'; return finish(null); }
+        if (startVoice) { detail.match = 'voice-start-control'; detail.scope = 'direct-voice-start-anchor'; return finish(el); }
         const testId = el.getAttribute('data-testid') || '';
         // The reported Send button is an authoritative anchor by itself. Do
         // not make it depend on discovering the editor or its current parents.
@@ -1792,6 +1853,9 @@
       diagnostics.state.hoverEditors = [...document.querySelectorAll(editorSelector)].filter(el => visibleControl(el) && !el.closest(excludedRegion)).length;
       diagnostics.state.hoverMarkers = [...document.querySelectorAll(modelMarkerSelector)].filter(el => visibleControl(el) && composerFor(el)).length;
       diagnostics.state.hoverSends = [...document.querySelectorAll(controlSelector)].filter(el => { const trigger = nativeTrigger(el); return trigger === el && (/send|submit/.test(el.getAttribute('data-testid') || el.id) || /^(?:send(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)$/i.test((el.getAttribute('aria-label') || '').trim())); }).length;
+      diagnostics.state.hoverRawMarkers = document.querySelectorAll(modelMarkerSelector).length;
+      diagnostics.state.hoverRawSends = [...document.querySelectorAll(controlSelector)].filter(el => /^(?:send-button|composer-send-button|composer-submit-button)$/.test(el.getAttribute('data-testid') || '') || el.id === 'composer-submit-button' || (el.matches('button[type="submit"].size-token-button-composer') && /^(?:send(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)$/i.test((el.getAttribute('aria-label') || '').trim()))).length;
+      diagnostics.state.hoverRawVoices = [...document.querySelectorAll('button')].filter(voiceStartControl).length;
       // Counts and fixed reason labels only: no URLs, attributes, chat text or DOM.
     };
     function showIncrement(key) {
@@ -1987,7 +2051,7 @@
     diagnostics?.mark('ready');
   }
   return { WEEK, PREFIX, inspectLocalStorage, storageSummary, completeStorage, modelKind, defaultSettings, validSettings, validEvent, windowFor, kindFor, mergeEvents, grouped, summarize,
-    conversationPage, conversationHistoryRequest, messageInfo, createMessageInfoState, createNativeMessageReader, currentItemTargets, currentMessageAncestors, renderMessageInfo, IMAGE_QUOTA_TTL, imageQuotaRequest, parseImageQuota, createImageQuotaState, powRequest, parsePow, createPowState, accountRequest, parseAccountId, createAccountState, requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, webDavTargets, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
+    conversationPage, conversationHistoryRequest, messageInfo, createMessageInfoState, createNativeMessageReader, createCommittedMessageIndex, currentItemTargets, currentMessageAncestors, renderMessageInfo, IMAGE_QUOTA_TTL, imageQuotaRequest, parseImageQuota, createImageQuotaState, powRequest, parsePow, createPowState, accountRequest, parseAccountId, createAccountState, requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, webDavTargets, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
 });
 
 

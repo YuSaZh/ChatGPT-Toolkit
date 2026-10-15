@@ -1,8 +1,13 @@
 # ChatGPT Toolkit 使用指南
 
-版本 1.1.15（实验预览）。面向 ChatGPT 网页体验的独立中文 Tampermonkey 工具集；当前提供 Pro 本机计数、被动图片 / PoW 状态、消息时间与模型、可选账号分账及 WebDAV 同步。安装文件：`chatgpt-pro-counter.user.js`。
+版本 1.1.16（实验预览）。面向 ChatGPT 网页体验的独立中文 Tampermonkey 工具集；当前提供 Pro 本机计数、被动图片 / PoW 状态、消息时间与模型、可选账号分账及 WebDAV 同步。安装文件：`chatgpt-pro-counter.user.js`。
 
-## 消息时间与模型（1.1.15）
+## 消息时间与模型（1.1.16）
+
+1.1.15 用户环境仍未显示，本版继续修正采集链：从 React 当前根向下建立真实已提交父链，避免挂起的并发渲染保留旧 return 指针而漏掉仍显示的历史消息。已用真实 React 19.2 + jsdom 复现旧路径失败 / 新路径通过；用户登录页尚待验证。并请求 Tampermonkey 的 page-context 模式，使用页面自己的 document 读取 React 属性，不增加注入桥或请求。
+
+空输入框的“开始语音”按钮和原发送按钮均支持同一个用量悬浮窗，保持“仅 Pro / 所有模型”的显示设置；只处理悬停 / 聚焦，不点击、不开启语音、不拦截原生点击。
+
 
 默认在消息末尾显示本地 `HH:mm`，助手消息附响应模型；悬停显示完整本地日期和 UTC 时间。可在“设置 → 消息时间与模型”关闭。时间是 `create_time` 创建时间，不是生成耗时；模型优先 `resolved_model_slug`，其次服务路由字段 / `model_slug`，不使用输入框选中模型代替实际响应模型。
 
@@ -12,7 +17,7 @@
 
 网络白名单缓存最多 500 条，仅标签页 RAM；会话 / 账号 / 关闭 / 离开时清空。原生消息与组件引用不跨显示扫描保存，账号栅栏使用弱键和宿主身份标量，切页或重复账号失效不会放开旧快照。元数据不进入计数、GM、导出、备份或 WebDAV；只有显示开关持久化。
 
-行为研究参考 [ChatGPT Checker Next](https://github.com/zetaloop/chatgpt-checker-next)，本版独立实现，未复制 AGPL 源码。455 项合成测试通过，真实登录页、浏览器布局、Tampermonkey / Firefox 沙箱仍待验证。云浏览器只能看到未登录的独立 mweb 页面，不能代表用户前端。可靠字段缺失、超大页面、临时 / 分享 / Work 等不同页面可能无法显示；不会主动补请求。见[验证记录](docs/VALIDATION.md)。
+行为研究参考 [ChatGPT Checker Next](https://github.com/zetaloop/chatgpt-checker-next)，本版独立实现，未复制 AGPL 源码。480 项合成测试通过，真实登录页、浏览器布局、Tampermonkey / Firefox 沙箱仍待验证。云浏览器只能看到未登录的独立 mweb 页面，不能代表用户前端。可靠字段缺失、超大页面、临时 / 分享 / Work 等不同页面可能无法显示；不会主动补请求。见[验证记录](docs/VALIDATION.md)。
 
 ## 计数归零或记录看不到时（1.1.12）
 

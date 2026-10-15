@@ -15,7 +15,7 @@ test('release uses Toolkit name and preserves persistent v1 storage namespace', 
 });
 
 test('release uses versioned GitHub update and install metadata', () => {
-  assert.deepEqual(values('version'), ['1.1.15']);
+  assert.deepEqual(values('version'), ['1.1.16']);
   assert.deepEqual(values('updateURL'), [raw]);
   assert.deepEqual(values('downloadURL'), [raw]);
   assert.deepEqual(values('homepageURL'), ['https://github.com/YuSaZh/ChatGPT-Toolkit']);
@@ -38,3 +38,9 @@ test('installation documentation points at the published raw script', () => {
 
 
 
+
+test('metadata requests page context for page-owned React expandos without new grants', () => {
+  assert.deepEqual(values('sandbox'), ['raw']);
+  assert.deepEqual(values('grant').sort(), ['unsafeWindow','GM_getValue','GM_setValue','GM_listValues','GM_xmlhttpRequest','GM_info','GM_registerMenuCommand'].sort());
+  assert.deepEqual(values('run-at'), ['document-start']);
+});

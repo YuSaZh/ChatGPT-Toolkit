@@ -1,8 +1,19 @@
 # ChatGPT Toolkit 验证记录
 
-版本：1.1.15（实验预览）
+版本：1.1.16（实验预览）
 日期：2026-10-15
 运行时：Node.js v24.19.0
+
+## 1.1.16 已通过与验证限制
+
+- 用户反馈 1.1.15 仍没有标签，新诊断为旧消息节点、新版消息组件、原生路径和快照均 0。该结果不能单独证明 sandbox 错误；可见模型 / 发送计数还受旧编辑器与偏好过滤影响。本版增加原始 DOM 锚点、React 宿主 / 根 / 已提交结构及未过滤模型 / 发送 / 语音开始数量，报告不含页面内容或身份。
+- [React 官方 TreeReflection](https://github.com/facebook/react/blob/v19.2.0/packages/react-reconciler/src/ReactFiberTreeReflection.js) 明确处理共享子树。真实 React 19.2 production + react-dom / jsdom（没有手工创建 Fiber）运行：初次渲染及 5 次普通 commit 正常；startTransition 遇到尚未完成的 Suspense 时，DOM 历史消息仍在，1.1.15 的严格 return 算法变为 0 路径 / 0 目标，正向 root.current 索引持续得到 2 个目标 / 2 个标签，0 请求。普通完成后的 memo bailout 不一定触发，因此不声称所有重绘都会失败。
+- 可复现运行时验证见 `validation/react-runtime/README.md`。它使用开发期固定版本 npm 包；用户脚本没有运行时依赖。这是实际 React 行为和 jsdom DOM 验证，不是 Chromium 布局、Tampermonkey 或用户 ChatGPT 登录页验收。
+- `node --test *.test.cjs`：480 项通过，0 失败、0 跳过。新增 9 项提交树 / document 视图回归、15 项精确语音 DOM / 焦点 / 指针 / 模型偏好 / 按钮切换 / 无自动请求回归、1 项 page-context 元信息检查。旧边界测试改用新索引的 256 深度 / 24,000 总节点上限；未放宽账号、内容读取或 getter 限制。
+- 本机 Node 性能补测：23,908 个已提交 Fiber、12 轮渲染，中位约 18.9 毫秒、最高约 59.3 毫秒；真实浏览器开销不能据此保证。仍有 200 毫秒合并窗口和有限遍历预算。
+- 新索引从最多 24 个 current 根正向构造规范父链，隐藏子树不访问；优先精确当前 renderedTurns 边界。旧 return 仅用于找到 root.current，不用于证明已提交祖先。多根、主容器不是 React host、共享旧子节点 / 新父快照、历史切换、同宿主重复渲染和访问器陷阱均覆盖。
+- [Tampermonkey 官方 sandbox 文档](https://www.tampermonkey.net/documentation.php?ext=hinc&q=sandbox) 说明 raw 请求 MAIN_WORLD，JavaScript 在 Firefox 使用 USERSCRIPT_WORLD 且对象跨界可能需特殊处理。本版 raw + unsafeWindow.document 是有依据的兼容修正；不保证管理器 / CSP 必然按预期注入，没有通过自行 eval 或绕过安全策略强行注入。
+- 独立审查本次尝试正常 Chromium 验证仍在启动阶段遇到 IPC socket / 环境只读挂载限制，没有进入浏览器断言或绕过限制。真实用户登录页及实际布局仍未验证。网络观察、计数存储与 WebDAV 核心不变；语音悬停不触发按钮、麦克风权限或任何请求。
 
 ## 1.1.15 已通过与验证限制
 
@@ -202,4 +213,11 @@ node --test *.test.cjs
 
 ```text
 d861095df85e41f0522c9637fdbfb05e860fd15324c6447f943641056618133b
+```
+
+
+1.1.16 脚本 SHA-256：
+
+```text
+1870da3322d009ed31134ef2ce1668d915ba877d4e95f0873bfffc6fc508cdeb
 ```

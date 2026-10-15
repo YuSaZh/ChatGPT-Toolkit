@@ -71,8 +71,8 @@ test('v114: replacing sender binds the new node once and retires the detached ho
   assert.deepEqual(e.errors, []);
 });
 
-test('v114: directly bound send changing into stop or voice does not retain hover', () => {
-  for (const label of ['Stop generating', 'Voice mode', '停止生成', '开始语音']) {
+test('v114: directly bound send changing into stop or dictation does not retain hover', () => {
+  for (const label of ['Stop generating', 'Voice mode', '停止生成', '开始听写']) {
     const e = setup(); e.showDirect();
     e.button.setAttribute('aria-label', label); e.mutate();
     e.showDirect(); assert.equal(e.hover().hidden, true, label);
@@ -255,3 +255,4 @@ test('v114: computed diagnostics expose classifications rather than private styl
   assert.match(text, /display-none \/ visibility-hidden \/ opacity-zero/);
   assert.deepEqual(e.errors, []);
 });
+

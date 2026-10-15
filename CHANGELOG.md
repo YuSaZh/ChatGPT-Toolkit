@@ -1,5 +1,12 @@
 # ChatGPT Toolkit 更新记录
 
+## 1.1.16 — 2026-10-15
+
+- 继续排查用户确认的 1.1.15 不显示问题。真实 React 19.2 在等待中的 Suspense 并发渲染可保留旧 return 链，导致旧严格父链误判已显示消息。现在从 root.current 正向建已提交父链；支持多个独立根及非 React main 的回退，保留精确身份 / 账号栅栏及扫描预算。
+- 改为官方 `@sandbox raw` page-context 声明，并使用页面 document 读取 React 属性；不增加 eval、模块包装、应用 getter 调用或 ChatGPT 请求。此为兼容加固，尚未证明用户具体环境的 realm 是根因。
+- 空输入框“开始语音”原生按钮与原发送按钮显示同一个用量悬浮窗；沿用 Pro-only / 所有模型设置，嵌套 SVG / use 和键盘聚焦可用，不启动语音、不干预点击，继续排除听写 / 停止等按钮。
+- 新增 25 项 Node 回归，共 480 项通过，另交付可复跑的真实 React / jsdom 并发渲染复现。真实用户登录页、Tampermonkey 注入和视觉布局仍未验收；不能将该运行时测试当作用户页面已解决。
+
 ## 1.1.15 — 2026-10-15
 
 - 修复 1.1.14 仍只适配旧消息 DOM / props 的缺口：支持新版 item / assistantItem 身份、精确内部 / 服务端会话对应、已物化 React query / external-store mapping，以及各消息独立挂载点。已经加载的历史不再必须等一次后续网络请求。

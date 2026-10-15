@@ -102,9 +102,9 @@ test('v116: all-model send needs no current selector or editor ancestry', () => 
   assert.equal(e.hover().hidden, false); assert.equal(e.send.closest('form'), null); assert.deepEqual(e.errors, []);
 });
 
-test('v116: all-model preference still excludes stop, voice and hidden controls', () => {
+test('v116: all-model preference still excludes stop, dictation and hidden controls', () => {
   for (const change of [
-    e => e.send.setAttribute('aria-label', 'Stop generating'), e => e.send.setAttribute('aria-label', '开始语音'),
+    e => e.send.setAttribute('aria-label', 'Stop generating'), e => e.send.setAttribute('aria-label', '开始听写'),
     e => e.send.setAttribute('aria-hidden', 'true'), e => e.send.setAttribute('hidden', ''),
   ]) {
     const e = all(); e.show(); assert.equal(e.hover().hidden, false); change(e); e.mutate(); e.show(); assert.equal(e.hover().hidden, true);
@@ -252,3 +252,4 @@ test('v116: compact overview keeps calibration actions operational and accessibl
   assert.equal(e.document.getElementById('chatgpt-pro-local-increment'), null);
   assert.ok(e.ui().querySelector('.panel')); assert.deepEqual(e.errors, []);
 });
+

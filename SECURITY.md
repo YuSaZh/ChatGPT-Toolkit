@@ -1,10 +1,10 @@
 # ChatGPT Toolkit：被动观察与网络行为审查
 
-## 1.1.15 消息元数据显示补充
+## 1.1.16 消息元数据显示补充
 
 此实现独立编写，不复制参考项目 AGPL 代码。已有同源自然历史 GET 响应仍限制为 1 MiB / 1.5 秒，POST 沿用原有 256 KiB / 30 秒响应副本；原 fetch Promise、参数、this、Response、错误及信号均保持，不增加请求或副本。计数、存储、导入导出及 WebDAV 核心保持。
 
-旧前端读取消息 DOM 身份及已提交 `messages[0]` / `conversation.id` props。新版先从有来源依据的时间线 / 消息锚点寻找已提交树（找不到锚点时最多检查 1,500 个普通容器），优先限定 `renderedTurns` 对话子树；结构扫描最多 24,000 个 Fiber、500 个新版消息目标。只读取直接 `item` / `assistantItem` 和会话身份字段，不递归遍历应用状态。每个宿主必须在该消息自己的已提交子树内，不跨不同嵌套消息，排除隐藏 React 树和隐藏 / 侧栏 / 对话框 / 控件宿主。返回的 assistant messageId 优先于 item latestMessageId。
+旧前端读取消息 DOM 身份及已提交 `messages[0]` / `conversation.id` props。新版先从有来源依据的时间线 / 消息锚点寻找已提交树（并有界检查最多 1,500 个普通容器），优先限定 `renderedTurns` 对话子树；最多识别 24 个根；从各 root.current 的 child / sibling 正向建立规范父链，总计最多 24,000 个 Fiber、256 层深度、500 个新版消息目标。旧 return 指针仅用于找到根，不证明当前祖先关系；不读取 pending / alternate 属性。只读取直接 `item` / `assistantItem` 和会话身份字段，不递归遍历应用状态。每个宿主必须在该消息自己的已提交子树内，不跨不同嵌套消息，排除隐藏 React 树和隐藏 / 侧栏 / 对话框 / 控件宿主。返回的 assistant messageId 优先于 item latestMessageId。
 
 精确消息祖先链上的 hook 仅检查已有 `memoizedState.data` 或已物化 external-store `queue.value`。后者必须与已提交 `memoizedState` 相同；不会调用 `getSnapshot` 来修复暂时不同的值。query 必须显式提供当前 conversation_id，裸 mapping 须由原生 `conversationId` / `browserConversationId` 证明当前会话；从 mapping 只查精确消息 ID。消息 ID、角色、recipient、隐藏标志、create_time 和模型字段都通过数据描述符读取，不执行 getter、不读取正文。不调用 scope.get / watch、组件、signal、queryFn、模块工厂 / 加载器，不修改原生函数或应用状态。
 
@@ -13,6 +13,12 @@
 原生对象只在一次显示扫描中临时读取，扫描后释放 props / hook / item / 组件树引用，只留用于账号隔离的宿主及身份标量；无原始消息副本。网络白名单缓存最多 500 条，仅 RAM；切页、账号、关闭、离开时失效。显示使用 textContent / 属性，不按正文、位置、请求模型或本机当前时间猜测。显示扫描合并窗口 200 毫秒，保留原有 5 秒恢复检查；关闭和非正式对话页不扫描新版树。设置仅写本机布尔值 `gpc.v1.ui.messageInfo`；元数据不进入计数、备份、导出或 WebDAV。
 
 公开参考源码与 React 官方 hook 实现支持上述结构研究；真实登录构建、扩展 realm 与布局仍未验收。未来私有前端结构改变时会省略标签，不主动取数。详见验证记录。
+
+### 页面上下文与语音悬停
+
+`@sandbox raw` 使用 Tampermonkey 官方 page-context 需求声明，boot 使用 unsafeWindow.document；没有新增 grant、远程运行时、脚本 eval / Function 编译或跨页面消息桥。GM 接口和凭据仍封闭在原有闭包，不导出给页面。管理器 / CSP 可能决定实际回退模式，真实扩展环境尚待验证。
+
+空输入框语音入口只识别原生 composer 按钮样式及精确的“开始语音”/ Start voice 标签，排除听写、麦克风、录音、停止和通话操作；沿用发送按钮同一悬浮窗和模型偏好。只增加识别条件，无点击 / 语音启动自动化，无 preventDefault / 点击拦截，也不新增网络行为。诊断中的原始 DOM / React 根 / 按钮均仅数量，不包含页面文字、会话 ID 或模型值。
 
 ## ChatGPT：只观察已有请求，不发起请求
 
