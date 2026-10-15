@@ -1,5 +1,16 @@
 # ChatGPT Toolkit 验证记录
 
+## 1.1.17 模块注入验证
+
+- 根目录 Node 回归：515 项全部通过；另有真实 React运行时与独立page bootstrap/fetch回归。构建、语法、依赖许可检查均独立运行。
+
+- 重新核对固定 [Checker Next 5.2.2](https://github.com/zetaloop/chatgpt-checker-next/blob/5ad36f8340c132e907e72300a7adaa81824cae9b/chatgpt-checker-next.user.js)：其注入开关决定 document-start webpack 工厂处理，AppScope 与 MessageInfo 由注入建立；普通现存 Fiber 快照不保证等价。参考只展示 get/watch 的调用，没有 selector/store 实现，因此本工具改为旁读原生已求值的 mapping，而不是主动调用这些方法。
+- 新 `module-metadata-transform.cjs` 使用 MIT Acorn，独立解析有来源依据的唯一 AST 绑定；回归覆盖 this/参数/返回/异常、可写 ID 拒绝、歧义拒绝、工厂语法和边界 React 加载顺序。浏览器解析器与内嵌主脚本均有可复现构建检查。
+- `validation/react-runtime/run-module.cjs` 使用真实 React 19.2 production / react-dom / jsdom、原生 webpack 风格 factory.call 和本地内联脚本执行。没有旧 message DOM 属性、没有手造 Fiber / AppScope；从 page ack、工厂改写、自然 selector 一次、已提交会话一路得到两条标签。历史 A→B→A 的 A selector 未重算仍显示，开关不增加原生 renderer/getter 次数。
+- 同套验证包括原 renderer null/hidden、自己的日期格式化异常、旧对象及首次迟到的新对象账号回流、原 getter 异常身份、来源动作插槽和全程零 fetch/XHR/socket。账号暂停需要用户自然刷新，不声称无缝切号恢复。
+- 这次没有可用的用户登录态浏览器；没有重新尝试先前被拒的 Chromium 沙箱绕过。jsdom 不验证 Tampermonkey/CSP 实际权限、用户构建 factory 的完整形状或浏览器视觉布局。因此必须以用户更新刷新后的显示/诊断确认最终适配结果。
+
+
 版本：1.1.16（实验预览）
 日期：2026-10-15
 运行时：Node.js v24.19.0

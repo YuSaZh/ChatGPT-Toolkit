@@ -17,3 +17,7 @@ After several completed commits, a transition renders a sibling that suspends in
 This reproduces a genuine discovery bug. It does not prove that the user's authenticated ChatGPT page encountered this precise state. It does not validate Tampermonkey injection, Firefox realms, ChatGPT's live cache shape, browser layout or microphone behavior. Generic completed memo bailouts do not necessarily fail; the reproduced condition is a pending concurrent render with a shared subtree.
 
 Primary-source explanation: [React's current-Fiber resolver](https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberTreeReflection.js) explicitly handles shared child lists across alternate parents. A return chain alone is not a canonical committed-parent index.
+
+## Passive module injection path (1.1.17)
+
+`node run-module.cjs` executes the bundled page-world runtime through real local inline scripts in jsdom, then naturally executes source-compatible webpack factories. It uses genuine React components, not synthetic Fibers. Checks cover page acknowledgement, boundary-before-message load order, mapping identity, committed conversation leases, source-action labels, cached history round trips, display toggle isolation, formatting faults, account pause and zero network. `npm test` runs both runtime suites. This does not claim to validate a logged-in ChatGPT build, browser layout, CSP enforcement or Tampermonkey.

@@ -80,7 +80,7 @@ test('empty local+remote payload stops after GET, while positive remote history 
 
 test('412 diagnostics do not invent a competing device and conflict retries take only one backup', async () => {
   let backups = 0, puts = 0;
-  await assert.rejects(api.syncWebDav(config, { local: () => api.snapshot(settings, [event('saved')]), backup() { backups++; }, apply() { assert.fail('must not apply'); }, async request(c, method) { if (method === 'GET') return { status: 404 }; puts++; return { status: 412 }; } }), /HTTP 412.*不能据此确定/);
+  await assert.rejects(api.syncWebDav(config, { local: () => api.snapshot(settings, [event('saved')]), backup() { backups++; }, apply() { assert.fail('must not apply'); }, async request(c, method) { if (method === 'GET') return { status: 404 }; puts++; return { status: 412 }; } }), /同步失败（HTTP 412）。本机记录已保留。/);
   assert.equal(puts, 3); assert.equal(backups, 1);
 });
 

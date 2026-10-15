@@ -1,24 +1,16 @@
 # ChatGPT Toolkit：被动观察与网络行为审查
 
-## 1.1.16 消息元数据显示补充
+## 1.1.17 只读元数据模块注入
 
-此实现独立编写，不复制参考项目 AGPL 代码。已有同源自然历史 GET 响应仍限制为 1 MiB / 1.5 秒，POST 沿用原有 256 KiB / 30 秒响应副本；原 fetch Promise、参数、this、Response、错误及信号均保持，不增加请求或副本。计数、存储、导入导出及 WebDAV 核心保持。
+独立 MIT 实现；内置 MIT Acorn 解析器，不从远端下载代码。document-start 向同一页面插入本地脚本，使用页面已有 nonce，并以实际执行 ack 判断成功。短暂观察 Function.prototype.call 以定位自然执行的 webpack；随后只在唯一识别的 mapping / message / conversation 工厂插入元数据显示逻辑。工厂未匹配、含歧义、已缓存执行或编译失败则不替换；不会主动 require / import 模块，也不会失败后重跑已经执行的原工厂。
 
-旧前端读取消息 DOM 身份及已提交 `messages[0]` / `conversation.id` props。新版先从有来源依据的时间线 / 消息锚点寻找已提交树（并有界检查最多 1,500 个普通容器），优先限定 `renderedTurns` 对话子树；最多识别 24 个根；从各 root.current 的 child / sibling 正向建立规范父链，总计最多 24,000 个 Fiber、256 层深度、500 个新版消息目标。旧 return 指针仅用于找到根，不证明当前祖先关系；不读取 pending / alternate 属性。只读取直接 `item` / `assistantItem` 和会话身份字段，不递归遍历应用状态。每个宿主必须在该消息自己的已提交子树内，不跨不同嵌套消息，排除隐藏 React 树和隐藏 / 侧栏 / 对话框 / 控件宿主。返回的 assistant messageId 优先于 item latestMessageId。
+mapping 包装观察原生 getter 已返回的同一对象，不调用 scope.get / watch / getSnapshot，不读聊天 content。用户消息 UI 在原生一次 render 后加独立 Label；助手只浅复制 props 的 sourcesAction 展示槽，原来源按钮和回调保持。时间 / 模型更新只触发本工具 Label，不重执行原生组件。Label 有自己的错误边界和格式化保护。React 仅来自原生已加载的导出，不调用导出访问器。
 
-精确消息祖先链上的 hook 仅检查已有 `memoizedState.data` 或已物化 external-store `queue.value`。后者必须与已提交 `memoizedState` 相同；不会调用 `getSnapshot` 来修复暂时不同的值。query 必须显式提供当前 conversation_id，裸 mapping 须由原生 `conversationId` / `browserConversationId` 证明当前会话；从 mapping 只查精确消息 ID。消息 ID、角色、recipient、隐藏标志、create_time 和模型字段都通过数据描述符读取，不执行 getter、不读取正文。不调用 scope.get / watch、组件、signal、queryFn、模块工厂 / 加载器，不修改原生函数或应用状态。
+页面桥只暴露元数据旁读、UI 包装和短时工厂编译接收，不暴露 GM、账本或凭据。DOM 控制桥仅传固定 on/off/reset/route；可分享诊断只含阶段和数量，不含 nonce、源码、账号、会话、模型或聊天内容。显示默认值在首次模块执行前传入。关闭仅隐藏；标量缓存最多 500 条、RAM-only，供原生 memo selector 不重算时返回历史，不写计数/导出/备份/WebDAV。
 
-优先已提交 live store，再使用 query 快照；隐藏 / 工具消息会否决旧网络标签。所有符合当前消息身份的候选快照、mapping、原始消息对象均加入弱键代次栅栏，包括未被选择的 query 回退。账号边界后栅栏跨重复失效及导航保留，仅克隆旧外壳不能绕过。宿主身份同样被隔离；新的自然网络元数据仍可显示。普通开关不会清除账号栅栏。
+账号清理采用 sticky epoch：尚未观察任何 mapping/lease 且未发生显式账号边界时，session / accounts / me 的启动 GET 可作为初始化清理；此后会话/账号边界一律清空并暂停注入标签直至用户自然刷新，防止首次迟到的旧响应冒充新源。等待 page ack 时也保存清理命令并先重放，不能漏掉跨账号边界。pagehide 清空；不主动刷新。保守暂停可能发生于普通后续 session 检查，诊断显示 paused-account。旧 DOM / 已提交 Fiber / 被动响应仅作兼容回退；模块显示激活或账号暂停后不叠加回退标签。
 
-原生对象只在一次显示扫描中临时读取，扫描后释放 props / hook / item / 组件树引用，只留用于账号隔离的宿主及身份标量；无原始消息副本。网络白名单缓存最多 500 条，仅 RAM；切页、账号、关闭、离开时失效。显示使用 textContent / 属性，不按正文、位置、请求模型或本机当前时间猜测。显示扫描合并窗口 200 毫秒，保留原有 5 秒恢复检查；关闭和非正式对话页不扫描新版树。设置仅写本机布尔值 `gpc.v1.ui.messageInfo`；元数据不进入计数、备份、导出或 WebDAV。
-
-公开参考源码与 React 官方 hook 实现支持上述结构研究；真实登录构建、扩展 realm 与布局仍未验收。未来私有前端结构改变时会省略标签，不主动取数。详见验证记录。
-
-### 页面上下文与语音悬停
-
-`@sandbox raw` 使用 Tampermonkey 官方 page-context 需求声明，boot 使用 unsafeWindow.document；没有新增 grant、远程运行时、脚本 eval / Function 编译或跨页面消息桥。GM 接口和凭据仍封闭在原有闭包，不导出给页面。管理器 / CSP 可能决定实际回退模式，真实扩展环境尚待验证。
-
-空输入框语音入口只识别原生 composer 按钮样式及精确的“开始语音”/ Start voice 标签，排除听写、麦克风、录音、停止和通话操作；沿用发送按钮同一悬浮窗和模型偏好。只增加识别条件，无点击 / 语音启动自动化，无 preventDefault / 点击拦截，也不新增网络行为。诊断中的原始 DOM / React 根 / 按钮均仅数量，不包含页面文字、会话 ID 或模型值。
+原有自然响应副本、账本和 WebDAV 逻辑保持；页面桥独立安装极小 fetch Proxy，仅辨认同源账号路径、在原生调用前清理标量，直接原样返回原 Promise/错误，不 clone、then 或补请求；该 fence 读回失败时暂停标签。外层观察器发来的 request 类清理在页面 fence 已安装时忽略以免双清理，显式/生命周期清理不忽略。账号路径支持字符串、原生 URL/Request；不执行任意 URL/方法访问器或字符串化，auth init 的未知方法保守清理。语音开始按钮的悬停支持保持，不点击、不启用麦克风、不拦截原生动作。真实用户登录页、扩展 CSP / realm 和实际布局未验收；失败保留原模块而不补请求。
 
 ## ChatGPT：只观察已有请求，不发起请求
 
@@ -27,7 +19,7 @@
 - 原 fetch 前只做受保护的请求分类、已有 Request 的 clone、缓存账本标量快照和内存状态代次失效，避免同步重入把旧请求关联到新账号。不会在此时读写聊天正文或等待哈希 / 网络；字符串 JSON 解析和响应读取在转发后。身份栅栏与图片 / PoW 辅助功能分别隔离，任一可选助手失败仍转发原调用。账本快照失败不回退到其他账号。
 - 响应只读取 clone。不会读取、取消或替换网页持有的 Response body。观察超时只取消副本分支，不调用页面请求的 abort，也不等待副本取消完成。
 - 请求副本最多读取 1 MiB / 1.5 秒；对话响应副本最多 256 KiB / 30 秒；图片额度、PoW 和会话响应副本各最多 64 KiB / 1.5 秒。观察代码仍有有限 CPU / 内存开销，不能承诺完全没有性能开销。
-- 没有主动 XMLHttpRequest、WebSocket、sendBeacon、登录请求、动态模块替换、远程运行时依赖、自动模型切换或工具启用。页面定时器只更新本地显示 / 状态；不会轮询 ChatGPT。
+- 没有主动 XMLHttpRequest、WebSocket、sendBeacon、登录请求、请求相关模块替换、远程运行时依赖、自动模型切换或工具启用。页面定时器只更新本地显示 / 状态；不会轮询 ChatGPT。
 
 ## 读取哪些信息
 

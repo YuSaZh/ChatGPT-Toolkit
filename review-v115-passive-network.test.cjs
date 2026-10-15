@@ -123,10 +123,17 @@ test('passive audit: startup, timers, hover, diagnostics and local UI make zero 
 
 test('passive audit: source has one native forwarding site and no alternate in-page network APIs or remote resources', () => {
   const source = fs.readFileSync(path.join(__dirname, 'chatgpt-pro-counter.user.js'), 'utf8');
-  assert.equal((source.match(/Reflect\.apply\(original, this, args\)/g) || []).length, 1);
+  const observerSource = source.slice(source.indexOf('  function installObserver('), source.indexOf('  function installObserver(') + 16000).split('\n  function ')[0];
+  assert.equal((observerSource.match(/Reflect\.apply\(original, this, args\)/g) || []).length, 1);
   assert.doesNotMatch(source, /\b(?:window|win|unsafeWindow)\.fetch\s*\(/);
   assert.doesNotMatch(source, /new\s+(?:XMLHttpRequest|WebSocket|EventSource)|\.sendBeacon\s*\(/);
-  assert.doesNotMatch(source, /createElement\(['"](?:script|img|iframe|link|audio|video)['"]\)|\bimport\s*\(|@import\b|url\(https?:/);
+  const executable = source.replace(/^  const metadataTransformerSource = .*;$/m, '');
+  assert.doesNotMatch(executable, /createElement\(['"](?:img|iframe|link|audio|video)['"]\)|\bimport\s*\(|@import\b|url\(https?:/);
+  for (const file of ['metadata-page-runtime.cjs', 'metadata-page-bootstrap.cjs']) {
+    const bridge = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    assert.doesNotMatch(bridge, /\.src\s*=|setAttribute\(['"]src|\bfetch\s*\(|GM_|new\s+(?:XMLHttpRequest|WebSocket|EventSource)/);
+    assert.match(bridge, /script\.textContent\s*=/, 'only locally bundled inline code is injected');
+  }
   assert.doesNotMatch(source, /\b(?:window|win)\.location\s*=|location\.(?:assign|replace)\s*\(/);
   assert.equal((source.match(/handle = gmRequest\(/g) || []).length, 1, 'the separate opt-in WebDAV transport is explicit');
 });
@@ -147,3 +154,4 @@ test('passive audit: redirected or mismatched response provenance never becomes 
     assert.equal(q.current(), null, metadata.url); assert.equal(calls, 1); assert.equal(output.bodyUsed, false);
   }
 });
+
