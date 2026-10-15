@@ -15,7 +15,7 @@ test('release uses Toolkit name and preserves persistent v1 storage namespace', 
 });
 
 test('release uses versioned GitHub update and install metadata', () => {
-  assert.deepEqual(values('version'), ['1.1.13']);
+  assert.deepEqual(values('version'), ['1.1.14']);
   assert.deepEqual(values('updateURL'), [raw]);
   assert.deepEqual(values('downloadURL'), [raw]);
   assert.deepEqual(values('homepageURL'), ['https://github.com/YuSaZh/ChatGPT-Toolkit']);
@@ -35,5 +35,6 @@ test('installation documentation points at the published raw script', () => {
     assert.doesNotMatch(text, /待上传|安装入口待上线/);
   }
 });
+
 
 

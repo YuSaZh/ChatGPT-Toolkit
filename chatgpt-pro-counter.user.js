@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.13
+// @version      1.1.14
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -32,9 +32,9 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.13', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: '1.1.14', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
-      state, open: null, inspectHover: null, inspectStorage: null,
+      state, open: null, inspectHover: null, inspectStorage: null, inspectMessageInfo: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
       fail(phase, error) {
         const names = ['Error', 'TypeError', 'ReferenceError', 'SyntaxError', 'RangeError', 'SecurityError', 'InvalidStateError', 'NotSupportedError', 'QuotaExceededError', 'AbortError'];
@@ -47,7 +47,8 @@
       },
       show() {
         try { diagnostics.inspectHover?.(); } catch (error) { diagnostics.fail('hover-diagnostics', error); }
-        const text = ['Pro 计数器启动诊断', `脚本版本: ${state.version}`, `启动阶段: ${state.phase}`, `页面检查: ${state.frame}`, `存储接口: ${state.storage}`, `界面状态: ${state.ui}`, `观察器: ${state.observer}`, `菜单接口: ${state.menu}`, `悬停监听: ${state.hoverListeners}`, `可见输入框: ${state.hoverEditors}`, `可见模型标记: ${state.hoverMarkers}`, `可见发送锚点: ${state.hoverSends}`, `最近悬停事件: ${state.hoverEvent}`, `最近控件匹配: ${state.hoverMatch}`, `最近输入框范围: ${state.hoverScope}`, `浮卡状态: ${state.hoverCard}`, `最近显示检查: ${state.hoverPaint}`, `document.readyState: ${document.readyState}`, `近期错误: ${state.errors.length ? state.errors.join('\n') : '无'}`, '此报告不读取聊天内容、计数记录或 WebDAV 凭据。'].join('\n');
+        try { Object.assign(state, diagnostics.inspectMessageInfo?.()); } catch (error) { diagnostics.fail('message-diagnostics', error); }
+        const text = ['Pro 计数器启动诊断', `脚本版本: ${state.version}`, `启动阶段: ${state.phase}`, `页面检查: ${state.frame}`, `存储接口: ${state.storage}`, `界面状态: ${state.ui}`, `观察器: ${state.observer}`, `消息信息: ${state.messageEnabled || 'unchecked'}`, `消息节点: ${state.messageNodes || 0}`, `网络消息元数据: ${state.messageCached || 0}`, `原生已提交路径: ${state.messageFiberPaths || 0}`, `原生消息属性: ${state.messagePropSources || 0}`, `原生消息元数据: ${state.messageNative || 0}`, `账号边界隔离节点: ${state.messageFenced || 0}`, `消息标签: ${state.messageBadges || 0}`, `菜单接口: ${state.menu}`, `悬停监听: ${state.hoverListeners}`, `可见输入框: ${state.hoverEditors}`, `可见模型标记: ${state.hoverMarkers}`, `可见发送锚点: ${state.hoverSends}`, `最近悬停事件: ${state.hoverEvent}`, `最近控件匹配: ${state.hoverMatch}`, `最近输入框范围: ${state.hoverScope}`, `浮卡状态: ${state.hoverCard}`, `最近显示检查: ${state.hoverPaint}`, `document.readyState: ${document.readyState}`, `近期错误: ${state.errors.length ? state.errors.join('\n') : '无'}`, '此报告不读取聊天内容、计数记录或 WebDAV 凭据。'].join('\n');
         try { if (typeof window.alert === 'function') window.alert(text); else console.info(text); } catch { /* retain the return value for diagnostics */ }
         return text;
       }
@@ -440,8 +441,8 @@
       current() { return { enabled: active, epoch, ledger, recognized: !!ledger }; }
     };
   }
-  // Per-message display uses protocol metadata only. It never reads React state,
-  // message text, request model choices, or the clipboard, and never fetches history.
+  // Per-message display reads protocol metadata and bounded current-message
+  // React props only. No message text, app functions, clipboard or history fetches.
   function conversationPage(url) {
     try { return shortId(new URL(url).pathname.match(/\/c\/([^/]+)\/?$/)?.[1]); } catch { return ''; }
   }
@@ -464,11 +465,11 @@
     return { id, conversation, role, createdAt, model: resolved || label, rank: resolved ? 2 : label ? 1 : 0 };
   }
   function createMessageInfoState({ page, changed = () => {}, enabled = true, limit = 500 } = {}) {
-    let active = !!enabled, epoch = 0, path = '', provisional = '', transition = null;
+    let active = !!enabled, epoch = 0, path = '', provisional = '', transition = null, nativeReader = null;
     const rows = new Map(), bound = Math.max(1, Math.min(500, Number.isInteger(limit) ? limit : 500));
     const currentPath = () => { try { const u = new URL(page()); return u.origin + u.pathname; } catch { return ''; } };
     const notify = () => { try { changed(); } catch { /* display only */ } };
-    const invalidate = () => { epoch++; provisional = ''; transition = null; rows.clear(); notify(); };
+    const invalidate = (fence = true) => { if (fence) { try { nativeReader?.invalidate(); } catch { /* remain fail closed for owned rows */ } } epoch++; provisional = ''; transition = null; rows.clear(); notify(); };
     function syncPage() {
       const next = currentPath();
       if (next !== path) {
@@ -476,7 +477,7 @@
         // This is the only navigation allowed to retain an in-flight generation.
         if (!(path && !conversationPage(path) && provisional && conversationPage(next) === provisional)) {
           const pending = path && !conversationPage(path) && conversationPage(next) ? { epoch, path, conversation: conversationPage(next) } : null;
-          invalidate(); transition = pending;
+          invalidate(false); transition = pending;
         }
         path = next;
       }
@@ -510,7 +511,8 @@
     }
     return {
       enabled: () => active,
-      setEnabled(value) { if (active !== !!value) { active = !!value; invalidate(); } },
+      nativeReader(doc) { if (!nativeReader) nativeReader = createNativeMessageReader(doc, { page }); return nativeReader; },
+      setEnabled(value) { if (active !== !!value) { active = !!value; invalidate(false); } },
       invalidate, syncPage,
       capture(conversation = '') {
         syncPage();
@@ -586,12 +588,130 @@
       size: () => rows.size
     };
   }
+  // Read only data properties: getters, component functions, stores and signals
+  // are never invoked. Raw messages/props remain page-owned and are not cached.
+  function dataProperty(object, key) {
+    if (!object || typeof object !== 'object') return undefined;
+    try { const property = Object.getOwnPropertyDescriptor(object, key); return property && own(property, 'value') ? property.value : undefined; }
+    catch { return undefined; }
+  }
+  function currentMessageAncestors(element) {
+    let attached;
+    try {
+      const keys = Object.getOwnPropertyNames(element);
+      if (keys.length > 200) return [];
+      const key = keys.find(key => key.startsWith('__reactFiber$'));
+      attached = key && dataProperty(element, key);
+    } catch { return []; }
+    // React may leave the original Fiber on a host node after a commit. Only
+    // inspect a branch that reaches the committed root, never both versions.
+    for (const start of [attached, dataProperty(attached, 'alternate')]) {
+      const chain = [], visited = new Set();
+      let node = start, steps = 0;
+      while (node && typeof node === 'object' && chain.length < 80 && !visited.has(node)) {
+        visited.add(node); chain.push(node);
+        const parent = dataProperty(node, 'return');
+        if (!parent) {
+          const root = dataProperty(node, 'stateNode');
+          if (dataProperty(root, 'current') === node) return chain;
+          break;
+        }
+        // Both alternates can point at the same committed parent after a
+        // bailout. Root equality alone then accepts stale props. Verify each
+        // edge is actually present in that parent's child/sibling list.
+        let child = dataProperty(parent, 'child'), linked = false;
+        const siblings = new Set();
+        while (child && typeof child === 'object' && !siblings.has(child) && ++steps <= 500) {
+          if (child === node) { linked = true; break; }
+          siblings.add(child); child = dataProperty(child, 'sibling');
+        }
+        if (!linked) break;
+        node = parent;
+      }
+    }
+    return [];
+  }
+  function createNativeMessageReader(doc, { page } = {}) {
+    let blockedSources = new WeakSet(), observedSources = new WeakSet(), blockedNodes = new WeakMap(), fencedPath = '';
+    let report = {};
+    const path = () => { try { return new URL(page()).origin + new URL(page()).pathname; } catch { return ''; } };
+    function sources(element) {
+      const result = [];
+      const chain = currentMessageAncestors(element);
+      if (chain.length) report.messageFiberPaths = (report.messageFiberPaths || 0) + 1;
+      for (const fiber of chain) {
+        const props = dataProperty(fiber, 'memoizedProps');
+        const messages = dataProperty(props, 'messages'), conversation = dataProperty(props, 'conversation');
+        // Source facts: ChatGPT's message renderer receives these props and
+        // emits the DOM identity from messages[0]. No whole-app tree traversal.
+        if (Array.isArray(messages) && messages.length <= 100 && conversation && typeof conversation === 'object') {
+          observedSources.add(props);
+          result.push({ props, messages, conversation });
+          report.messagePropSources = (report.messagePropSources || 0) + 1;
+          break; // nearest message boundary only
+        }
+      }
+      return result;
+    }
+    function scalarMessage(value) {
+      const author = dataProperty(value, 'author'), metadata = dataProperty(value, 'metadata'), route = dataProperty(metadata, 'server_ste_metadata');
+      return {
+        id: dataProperty(value, 'id'), author: { role: dataProperty(author, 'role') }, recipient: dataProperty(value, 'recipient'), create_time: dataProperty(value, 'create_time'),
+        metadata: { is_visually_hidden_from_conversation: dataProperty(metadata, 'is_visually_hidden_from_conversation'), model_slug: dataProperty(metadata, 'model_slug'), resolved_model_slug: dataProperty(metadata, 'resolved_model_slug'), server_ste_metadata: { model_slug: dataProperty(route, 'model_slug') } }
+      };
+    }
+    return {
+      begin() { report = { messageFiberPaths: 0, messagePropSources: 0, messageFenced: 0 }; },
+      report: () => ({ ...report }),
+      invalidate() {
+        fencedPath = path(); blockedSources = observedSources; observedSources = new WeakSet(); blockedNodes = new WeakMap();
+        // Auth requests fence scalar node identities before native fetch. The
+        // Fiber scan remains on the deferred display path, not the request path.
+        for (const element of Array.from(doc.querySelectorAll('[data-message-id][data-message-author-role]')).slice(-500)) {
+          blockedNodes.set(element, [element.getAttribute('data-message-id'), element.getAttribute('data-message-author-role')].join('\0'));
+        }
+      },
+      read(element, id, role, observedConversation = '') {
+        const currentPath = path(), conversation = conversationPage(currentPath);
+        if (!conversation || !shortId(id) || !['user', 'assistant'].includes(role)) return null;
+        if (fencedPath && fencedPath !== currentPath) { blockedSources = new WeakSet(); observedSources = new WeakSet(); blockedNodes = new WeakMap(); fencedPath = ''; }
+        if (blockedNodes.get(element) === [id, role].join('\0')) { report.messageFenced = (report.messageFenced || 0) + 1; return null; }
+        const candidates = sources(element);
+        for (const source of candidates) {
+          if (blockedSources.has(source.props)) { report.messageFenced = (report.messageFenced || 0) + 1; return null; }
+          if (shortId(dataProperty(source.conversation, 'id')) !== conversation) return { rejected: true };
+          // The group's first message is the exact host identity; other group
+          // members can be reasoning/tool records and must not be mislabeled.
+          const first = dataProperty(source.messages, '0');
+          if (dataProperty(first, 'id') !== id || dataProperty(dataProperty(first, 'author'), 'role') !== role) return { rejected: true };
+          const row = messageInfo(scalarMessage(first), conversation);
+          return row ? { ...row, source: 'native-props' } : { rejected: true };
+        }
+        // This attribute is emitted by the native renderer from model_slug.
+        // It is only a label fallback; never a selected/requested model guess.
+        const model = role === 'assistant' ? slug(element.getAttribute('data-message-model-slug')) : '';
+        // The attribute alone cannot prove which conversation a recycled node
+        // belongs to. Require an independently observed exact current ID.
+        if (!model || observedConversation !== conversation) return null;
+        return { id, conversation, role, createdAt: null, model, rank: 1, source: 'native-attribute' };
+      }
+    };
+  }
   const messageBadgeCache = new WeakMap();
-  function renderMessageInfo(doc, state, badges) {
+  function renderMessageInfo(doc, state, badges, nativeReader) {
     state.syncPage();
-    const found = new Set();
+    nativeReader ||= state.nativeReader?.(doc);
+    nativeReader?.begin();
+    const found = new Set(), report = { messageEnabled: state.enabled() ? 'on' : 'off', messageNodes: 0, messageCached: state.size(), messageNative: 0, messageBadges: 0 };
     if (state.enabled()) for (const element of Array.from(doc.querySelectorAll('[data-message-id][data-message-author-role]')).slice(-500)) {
-      const row = state.get(element.getAttribute('data-message-id'), element.getAttribute('data-message-author-role'));
+      report.messageNodes++;
+      const id = element.getAttribute('data-message-id'), role = element.getAttribute('data-message-author-role');
+      let row = state.get(id, role);
+      if (nativeReader) {
+        const native = nativeReader.read(element, id, role, row?.conversation);
+        if (native?.rejected) row = null;
+        else if (native) { report.messageNative++; row = row ? { ...native, createdAt: native.createdAt ?? row.createdAt, model: row.rank > native.rank ? row.model : native.model } : native; }
+      }
       if (!row || (!row.createdAt && !row.model)) continue;
       found.add(element);
       let badge = badges.get(element);
@@ -611,6 +731,8 @@
       if (badge.getAttribute('aria-label') !== title) badge.setAttribute('aria-label', title);
     }
     for (const [element, badge] of badges) if (!found.has(element)) { badge.remove(); badges.delete(element); }
+    report.messageBadges = found.size;
+    return { ...report, ...nativeReader?.report() };
   }
   function installObserver(win, { save, ledger, changed = () => {}, clock = Date.now, random = uuid, hash = digest, inspect = inspectResponse, imageQuota, pow, account, captureLedger, messageInfoState }) {
     const original = win.fetch;
@@ -971,10 +1093,12 @@
       if (messageInfoTimer) return;
       messageInfoTimer = setTimeout(() => {
         messageInfoTimer = null;
-        try { renderMessageInfo(document, messageInfoState, messageBadges); } catch { /* unsupported page DOM: omit badges */ }
+        try { const report = renderMessageInfo(document, messageInfoState, messageBadges); if (diagnostics) Object.assign(diagnostics.state, report); } catch { /* unsupported page DOM: omit badges */ }
       }, 80);
     }
     const messageInfoState = createMessageInfoState({ page: () => win.location.href, changed: scheduleMessageInfo, enabled: false });
+    messageInfoState.nativeReader(document);
+    if (diagnostics) diagnostics.inspectMessageInfo = () => renderMessageInfo(document, messageInfoState, messageBadges);
     // Transient UI state; never persisted or included in backups/sync.
     const knownCountKeys = new Set(), queuedIncrements = new Map();
     let quotaExpiryTimer;
@@ -1199,7 +1323,7 @@
       if (accountPending()) throw Error('账号待识别，暂不能校准。可关闭自动识别后手动选择账本。');
       const id = uuid(); save({ v: 1, id, key: `m:${id}`, ledger: settings.ledger, at, updated: at, state: 'manual', observation: 'manual', delta, requested: '', route: '', label: '', stable: true, conflict: false, http: 0 });
     }
-    function messageInfoPreferenceHint() { if (messageInfoReadError) return '显示设置读取失败，保留上次选择；首次加载时暂不显示。请检查本机存储。'; return '仅显示页面自然收到的消息创建时间与响应模型；悬停查看完整时间。缺失时不猜测、不补请求。关闭会清空本页元数据，重新开启后等待自然加载。仅本机设置。'; }
+    function messageInfoPreferenceHint() { if (messageInfoReadError) return '显示设置读取失败，保留上次选择；首次加载时暂不显示。请检查本机存储。'; return '从页面自然收到或当前已加载的原生消息中只读显示创建时间与响应模型；悬停查看完整时间。缺失时不猜测、不补请求。关闭会清空本工具的消息元数据；重新开启会尝试读取当前页。仅本机设置。'; }
     function refreshMessageInfoPreference(message = '') {
       for (const value of ['on', 'off']) root?.querySelector(`#message-info-${value}`)?.setAttribute('aria-pressed', String(messageInfoState.enabled() === (value === 'on')));
       const status = root?.querySelector('#message-info-status'); if (status) status.textContent = message || messageInfoPreferenceHint();
@@ -1698,7 +1822,7 @@
     win.addEventListener('pagehide', () => messageInfoState.invalidate());
     document.addEventListener('DOMContentLoaded', safeMount, { once: true });
     // React navigation can replace the body or remove our host. Reattach the same roots.
-    try { new MutationObserver(() => { scheduleMessageInfo(); if (quotaPage !== win.location.href) invalidateImageQuota(); if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'style', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target', 'data-message-id', 'data-message-author-role'] }); } catch { /* interval below also recovers */ }
+    try { new MutationObserver(() => { scheduleMessageInfo(); if (quotaPage !== win.location.href) invalidateImageQuota(); if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'style', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target', 'data-message-id', 'data-message-author-role', 'data-message-model-slug'] }); } catch { /* interval below also recovers */ }
     setInterval(() => {
       scheduleMessageInfo();
       const mounted = safeMount(); const before = lastKeys, s = settings.id; load();
@@ -1710,7 +1834,8 @@
     diagnostics?.mark('ready');
   }
   return { WEEK, PREFIX, inspectLocalStorage, storageSummary, completeStorage, modelKind, defaultSettings, validSettings, validEvent, windowFor, kindFor, mergeEvents, grouped, summarize,
-    conversationPage, conversationHistoryRequest, messageInfo, createMessageInfoState, renderMessageInfo, IMAGE_QUOTA_TTL, imageQuotaRequest, parseImageQuota, createImageQuotaState, powRequest, parsePow, createPowState, accountRequest, parseAccountId, createAccountState, requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, webDavTargets, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
+    conversationPage, conversationHistoryRequest, messageInfo, createMessageInfoState, createNativeMessageReader, currentMessageAncestors, renderMessageInfo, IMAGE_QUOTA_TTL, imageQuotaRequest, parseImageQuota, createImageQuotaState, powRequest, parsePow, createPowState, accountRequest, parseAccountId, createAccountState, requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, webDavTargets, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
 });
+
 
 

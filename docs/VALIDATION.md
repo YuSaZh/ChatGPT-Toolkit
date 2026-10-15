@@ -1,8 +1,17 @@
 # ChatGPT Toolkit 验证记录
 
-版本：1.1.13（实验预览）
+版本：1.1.14（实验预览）
 日期：2026-10-15
 运行时：Node.js v24.19.0
+
+## 1.1.14 已通过与验证限制
+
+- 本次重新逐段读取 [Checker Next 固定版本](https://github.com/zetaloop/chatgpt-checker-next/blob/5ad36f8340c132e907e72300a7adaa81824cae9b/chatgpt-checker-next.user.js)：其消息信息直接读原生 AppScope mapping，并在 React 组件中显示。1.1.13 的后续 fetch 观察不是该实现的等价替代；开关重开也没有恢复已加载元数据的来源。
+- 另核对实际公开 ChatGPT 构建 prod-a55478c3ac4c8f1df8539a0845d619d9fddce90d 的 [消息渲染资源](https://chatgpt.com/cdn/assets/8b34dbc2-nt22x0rk0pr335tb.js) 及 [消息初始化资源](https://chatgpt.com/cdn/assets/4813494d-e688mn57gf7k52mc.js)：原生渲染器接收 conversation / messages，DOM 身份来自 messages[0]，原消息初始化保留服务元数据。新适配器基于这些数据路径独立实现，没有复制组件 / 模块源代码，也没有采用参考项目的模块替换。
+- 新增 32 项有来源依据的合成回归，覆盖无网络历史预填时已加载消息显示、开关重开、项目路径、新聊天 URL 转换、准确身份、当前根 / alternate / 共享父节点、隐藏 / 工具信息覆盖旧缓存、账号隔离、无 getter / 信号 / 正文读取、祖先与兄弟链边界，以及菜单数量诊断。
+- `node --test *.test.cjs`：416 项通过，0 失败、0 跳过；JS / CJS 语法检查通过。旧存储 / 同步核心、fetch 观察器与持久化格式未修改。原有诊断菜单可直接查看消息节点、原生已提交路径、原生消息属性、可用元数据、隔离节点和标签数量，无需控制台代码。
+- 这些验证不等于用户登录页验收。公开构建的原生结构与参考项目针对的 AppScope 构建不同；用户的构建、Tampermonkey 沙箱 / 浏览器 realm、真实布局和跨浏览器注入尚未验证。既有浏览器启动 socket 限制未绕过。未访问真实账号 / WebDAV / 凭据，未发送聊天或主动请求历史。
+- 支持必须同时具备精确 DOM 消息身份、可读取的已提交消息祖先 props、原生 conversation.id 与当前 URL 相符；不调用 serverId$ 来推断客户端 / 服务端 ID。没有这些条件时继续依赖原有自然网络路径，或省略显示。账号边界后同一旧节点须等待页面替换或新自然响应；不会为了显示而放宽隔离、请求历史或改写应用状态。
 
 ## 1.1.13 已通过与验证限制
 
@@ -177,3 +186,4 @@ node --test *.test.cjs
 ```text
 4fdc533e051f370430ab8d1bcdc68a22a4abf21dc07eb56f73ad2b38cb607c21
 ```
+
