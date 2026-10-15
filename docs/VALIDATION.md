@@ -1,8 +1,18 @@
 # ChatGPT Toolkit 验证记录
 
-版本：1.1.14（实验预览）
+版本：1.1.15（实验预览）
 日期：2026-10-15
 运行时：Node.js v24.19.0
+
+## 1.1.15 已通过与验证限制
+
+- 完整核对 [Checker Next 5.2.2 固定源码](https://github.com/zetaloop/chatgpt-checker-next/blob/5ad36f8340c132e907e72300a7adaa81824cae9b/chatgpt-checker-next.user.js)：其 document-start 捕获 webpack、改写模块、捕获 AppScope，再以 mapping + item / assistantItem 身份显示；旧 data-message-id DOM 路径不是等价适配。本版没有复制这些 AGPL 模块 / 组件包装，也没有使用其模型修改、请求包装、自动批准等功能。
+- 独立结构研究另核对 [AI Conversation Navigator 当前来源](https://greasyfork.org/en/scripts/545883-ai-conversation-navigator/code) 中的 query producer、当前新锚点和已物化 mapping hook；未采用其主动拉取、hydration、写状态或 getter 调用。[React 官方 ReactFiberHooks.js](https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberHooks.js) 确认 useSyncExternalStore 的 memoizedState / queue.value / getSnapshot 结构。本版自己实现数据描述符读取与准确身份匹配，只读取已存值、不调用回调。
+- `node --test *.test.cjs`：455 项通过，0 失败、0 跳过。新增 31 项新版前端回归 + 8 项独立审查回归；不是把旧测试重复导入计数。所有 JS / CJS 语法检查通过。原 fetch 观察器、计数 / 存储 / WebDAV 核心与发布基线保持。
+- 场景覆盖旧 DOM 身份全为 0、已加载 query / mapping、历史 SPA 前进返回、准确 ID 优先级、内部 / 服务端会话对应、隐藏 / 工具消息否决、开关恢复、组件 / 宿主重挂载、未提交 alternate、访问器陷阱、快照不同步、嵌套消息、Offscreen / LegacyHidden / Activity、对话框 / 侧栏副本、重复账号失效、旧 query 回退及旧消息外壳克隆。独立审查发现的账号 / 嵌套边界问题已在发布前修复并重跑。
+- 性能合成检查：23,900 个无关已提交 Fiber + 2 个消息宿主，12 轮扫描中位约 11.3 毫秒，冷轮最高约 41.8 毫秒（本机 Node，不能外推至真实浏览器）。扫描上限 24,000 个结构节点 / 500 个新版目标，优先对话子树；200 毫秒合并，不因脚注自身重复创建节点；关闭或无正式对话 ID 时不进行新版树扫描。
+- 真实云浏览器可以打开 ChatGPT 公开页，但只显示未登录 unauth-mweb 页面（mobile-composer-prompt），不是参考源码针对的登录前端；没有发送消息或登录。本地浏览器 fixture 的 file:// 导航被浏览器协议策略拒绝；改用正常本地 HTTP 服务后云浏览器报 ERR_CONNECTION_REFUSED，页面断言没有运行。旧 Chromium sandbox 绕过没有重试。真实用户登录页、Tampermonkey / Firefox realm 和标签布局仍未验证，不能把合成历史切换写成真实用户页成功。
+- 可用 `node ui-current-frontend-fixture.cjs` 生成本地 HTML，在自己正常开发浏览器中打开或通过本地 HTTP 服务查看；包含显示开关、历史切换、账号边界与新宿主恢复按钮。此 fixture 使用真实 DOM + 合成 Fiber，仍不是 ChatGPT 或真实 React runtime 验收。
 
 ## 1.1.14 已通过与验证限制
 
@@ -187,3 +197,9 @@ node --test *.test.cjs
 4fdc533e051f370430ab8d1bcdc68a22a4abf21dc07eb56f73ad2b38cb607c21
 ```
 
+
+1.1.15 脚本 SHA-256：
+
+```text
+d861095df85e41f0522c9637fdbfb05e860fd15324c6447f943641056618133b
+```
