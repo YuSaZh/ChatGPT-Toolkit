@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.12
+// @version      1.1.13
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
 // @downloadURL  https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
-// @description  ChatGPT Toolkit：Pro 本机统计、被动 PoW/图片状态、可选账号分账与 WebDAV 同步。非官方工具。
+// @description  ChatGPT Toolkit：Pro 本机统计、被动 PoW/图片状态、消息时间/模型、可选账号分账与 WebDAV 同步。非官方工具。
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @run-at       document-start
@@ -32,7 +32,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.12', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: '1.1.13', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null, inspectStorage: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -299,12 +299,12 @@
         const body = block.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n').trim();
         if (body === '[DONE]') { doneMarker = true; return; }
         if (!body) return;
-        try { parseMetadata(JSON.parse(body), state); } catch { /* malformed frame is ignored */ }
+        try { const data = JSON.parse(body); parseMetadata(data, state); try { opts.onFrame?.(data); } catch { /* optional display */ } } catch { /* malformed frame is ignored */ }
       };
       while (true) {
         const part = await Promise.race([reader.read(), timeout]);
         if (part.done) {
-          if (/json/i.test(type)) { try { parseMetadata(JSON.parse(json + decoder.decode()), state); } catch { report('unreadable'); return; } }
+          if (/json/i.test(type)) { try { const data = JSON.parse(json + decoder.decode()); parseMetadata(data, state); try { opts.onFrame?.(data); } catch { /* optional display */ } } catch { report('unreadable'); return; } }
           else if (buffer) consume(buffer);
           report(state.handoff ? 'handoff' : 'done'); return;
         }
@@ -440,17 +440,193 @@
       current() { return { enabled: active, epoch, ledger, recognized: !!ledger }; }
     };
   }
-  function installObserver(win, { save, ledger, changed = () => {}, clock = Date.now, random = uuid, hash = digest, inspect = inspectResponse, imageQuota, pow, account, captureLedger }) {
+  // Per-message display uses protocol metadata only. It never reads React state,
+  // message text, request model choices, or the clipboard, and never fetches history.
+  function conversationPage(url) {
+    try { return shortId(new URL(url).pathname.match(/\/c\/([^/]+)\/?$/)?.[1]); } catch { return ''; }
+  }
+  function conversationHistoryRequest(input, init, base) {
+    try {
+      const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, base);
+      const method = String(init?.method || input?.method || 'GET').toUpperCase();
+      if (method !== 'GET' || url.origin !== new URL(base).origin) return '';
+      const id = shortId(url.pathname.match(/^\/backend-api\/conversation\/([^/]+)\/?$/)?.[1]);
+      return ['init', 'prepare', 'resume'].includes(id) ? '' : id;
+    } catch { return ''; }
+  }
+  function messageInfo(message, conversation) {
+    if (!message || typeof message !== 'object') return null;
+    const id = shortId(message.id), role = message.author?.role, metadata = message.metadata;
+    if (!id || !['user', 'assistant'].includes(role) || (message.recipient && message.recipient !== 'all') || metadata?.is_visually_hidden_from_conversation) return null;
+    const createdAt = typeof message.create_time === 'number' && finiteDate(message.create_time * 1000) ? message.create_time * 1000 : null;
+    const resolved = role === 'assistant' ? slug(metadata?.resolved_model_slug) || slug(metadata?.server_ste_metadata?.model_slug) : '';
+    const label = role === 'assistant' ? slug(metadata?.model_slug) : '';
+    return { id, conversation, role, createdAt, model: resolved || label, rank: resolved ? 2 : label ? 1 : 0 };
+  }
+  function createMessageInfoState({ page, changed = () => {}, enabled = true, limit = 500 } = {}) {
+    let active = !!enabled, epoch = 0, path = '', provisional = '', transition = null;
+    const rows = new Map(), bound = Math.max(1, Math.min(500, Number.isInteger(limit) ? limit : 500));
+    const currentPath = () => { try { const u = new URL(page()); return u.origin + u.pathname; } catch { return ''; } };
+    const notify = () => { try { changed(); } catch { /* display only */ } };
+    const invalidate = () => { epoch++; provisional = ''; transition = null; rows.clear(); notify(); };
+    function syncPage() {
+      const next = currentPath();
+      if (next !== path) {
+        // A new chat gets its URL after the response supplies its conversation ID.
+        // This is the only navigation allowed to retain an in-flight generation.
+        if (!(path && !conversationPage(path) && provisional && conversationPage(next) === provisional)) {
+          const pending = path && !conversationPage(path) && conversationPage(next) ? { epoch, path, conversation: conversationPage(next) } : null;
+          invalidate(); transition = pending;
+        }
+        path = next;
+      }
+    }
+    function valid(token, conversation) {
+      syncPage();
+      if (!active || !token || !conversation) return false;
+      // The site may change the URL before our cloned stream receives its first frame.
+      // Admit that single new-chat transition only once its exact response ID matches.
+      if (token.epoch !== epoch && transition && token.epoch === transition.epoch && token.path === transition.path && !token.conversation && conversation === transition.conversation) token.epoch = epoch;
+      if (token.epoch !== epoch) return false;
+      const current = conversationPage(path);
+      if (token.conversation && token.conversation !== conversation) return false;
+      if (current && current !== conversation) return false;
+      if (!current && token.path !== path) return false;
+      if (provisional && provisional !== conversation) return false;
+      if (!current) provisional = conversation;
+      return true;
+    }
+    const forget = id => { if (rows.delete(id)) notify(); };
+    function remember(row) {
+      if (!row) return;
+      const prior = rows.get(row.id);
+      if (prior && prior.conversation === row.conversation && prior.role === row.role) {
+        row = { ...row, createdAt: row.createdAt ?? prior.createdAt, ...(row.rank < prior.rank ? { model: prior.model, rank: prior.rank } : {}) };
+      }
+      if (JSON.stringify(prior) === JSON.stringify(row)) return;
+      rows.delete(row.id); rows.set(row.id, row);
+      while (rows.size > bound) rows.delete(rows.keys().next().value);
+      notify();
+    }
+    return {
+      enabled: () => active,
+      setEnabled(value) { if (active !== !!value) { active = !!value; invalidate(); } },
+      invalidate, syncPage,
+      capture(conversation = '') {
+        syncPage();
+        const current = conversationPage(path);
+        if (!active || !path || (conversation && conversation !== current)) return null;
+        return { epoch, path, conversation: conversation || current };
+      },
+      history(token, data) {
+        const conversation = shortId(data?.conversation_id) || shortId(data?.id) || token?.conversation;
+        if (!valid(token, conversation) || !data?.mapping || typeof data.mapping !== 'object' || Array.isArray(data.mapping)) return;
+        let count = 0;
+        for (const key in data.mapping) {
+          if (!own(data.mapping, key)) continue;
+          if (++count > 5000) break;
+          const message = data.mapping[key]?.message, row = messageInfo(message, conversation);
+          if (row) remember(row); else forget(shortId(message?.id));
+        }
+      },
+      frame(token, data, context = {}) {
+        // Context holds only scalar IDs/roles, never a response/message object.
+        const visit = (value, depth = 0) => {
+          if (!value || typeof value !== 'object' || depth > 6) return;
+          if (Array.isArray(value)) { for (const item of value.slice(0, 100)) visit(item, depth + 1); return; }
+          const supplied = shortId(value.conversation_id);
+          if (supplied) {
+            if (context.conversation && context.conversation !== supplied) { context.id = ''; context.role = ''; }
+            context.conversation = supplied;
+          }
+          const conversation = context.conversation || token?.conversation;
+          if (value.message && typeof value.message === 'object' && valid(token, conversation)) {
+            const row = messageInfo(value.message, conversation);
+            if (!row) forget(shortId(value.message.id));
+            context.id = row?.id || ''; context.role = row?.role || '';
+            remember(row);
+          }
+          // Only explicit metadata patches after an identified visible message.
+          // Unknown/compact/content paths are deliberately not reconstructed.
+          if (typeof value.p === 'string') {
+            const prior = rows.get(context.id);
+            const identityChange = /^\/message\/(?:id|author(?:\/|$)|recipient(?:\/|$))/.test(value.p);
+            const visibilityChange = value.p === '/message/metadata/is_visually_hidden_from_conversation';
+            if (identityChange || visibilityChange || (value.p.startsWith('/message') && value.o === 'remove')) {
+              if (valid(token, conversation)) forget(context.id);
+              context.id = ''; context.role = ''; return;
+            }
+            if (value.p === '/message/metadata') {
+              if (prior && valid(token, conversation) && value.v && typeof value.v === 'object' && ['add', 'replace', 'append'].includes(value.o)) {
+                const row = messageInfo({ id: prior.id, author: { role: prior.role }, create_time: prior.createdAt === null ? null : prior.createdAt / 1000, metadata: value.v }, conversation);
+                if (row) remember(row); else { forget(context.id); context.id = ''; context.role = ''; }
+              } else { if (valid(token, conversation)) forget(context.id); context.id = ''; context.role = ''; }
+              return;
+            }
+            if (prior && valid(token, conversation) && prior.conversation === conversation && ['add', 'replace'].includes(value.o)) {
+              if (value.p === '/message/create_time' && typeof value.v === 'number' && finiteDate(value.v * 1000)) remember({ ...prior, createdAt: value.v * 1000 });
+              if (prior.role === 'assistant' && ['/message/metadata/model_slug', '/message/metadata/resolved_model_slug', '/message/metadata/server_ste_metadata/model_slug'].includes(value.p)) {
+                const model = slug(value.v), rank = value.p === '/message/metadata/model_slug' ? 1 : 2;
+                if (model) remember({ ...prior, model, rank });
+              }
+            }
+            if (value.p !== '' && value.p !== '/message') return;
+            if (value.p === '/message' && value.v && typeof value.v === 'object' && valid(token, conversation)) {
+              const row = messageInfo(value.v, conversation); if (!row) forget(shortId(value.v.id)); context.id = row?.id || ''; context.role = row?.role || ''; remember(row); return;
+            }
+          }
+          for (const key of ['data', 'payload', 'v']) if (value[key] && typeof value[key] === 'object') visit(value[key], depth + 1);
+        };
+        visit(data);
+      },
+      get(id, role) {
+        syncPage(); const row = active && rows.get(id), conversation = conversationPage(path) || provisional;
+        return row && row.role === role && row.conversation === conversation ? { ...row } : null;
+      },
+      size: () => rows.size
+    };
+  }
+  const messageBadgeCache = new WeakMap();
+  function renderMessageInfo(doc, state, badges) {
+    state.syncPage();
+    const found = new Set();
+    if (state.enabled()) for (const element of Array.from(doc.querySelectorAll('[data-message-id][data-message-author-role]')).slice(-500)) {
+      const row = state.get(element.getAttribute('data-message-id'), element.getAttribute('data-message-author-role'));
+      if (!row || (!row.createdAt && !row.model)) continue;
+      found.add(element);
+      let badge = badges.get(element);
+      if (!badge || badge.parentNode !== element) {
+        badge?.remove(); badge = doc.createElement('span'); badge.className = 'chatgpt-toolkit-message-info';
+        badge.style.cssText = 'display:block;max-width:100%;margin-top:6px;font:11px/1.5 system-ui,sans-serif;color:inherit;opacity:.65;overflow-wrap:anywhere;user-select:text;';
+        element.appendChild(badge); badges.set(element, badge);
+      }
+      const renderKey = JSON.stringify([row.id, row.conversation, row.role, row.createdAt, row.model]);
+      if (messageBadgeCache.get(badge) === renderKey) continue;
+      messageBadgeCache.set(badge, renderKey);
+      const date = row.createdAt ? new Date(row.createdAt) : null;
+      const text = [date?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }), row.model].filter(Boolean).join(' · ');
+      const title = [date ? `消息创建时间（本地）：${date.toLocaleString()} (${date.toISOString()})` : '', row.model ? `响应模型：${row.model}` : ''].filter(Boolean).join('\n');
+      if (badge.textContent !== text) badge.textContent = text;
+      if (badge.getAttribute('title') !== title) badge.setAttribute('title', title);
+      if (badge.getAttribute('aria-label') !== title) badge.setAttribute('aria-label', title);
+    }
+    for (const [element, badge] of badges) if (!found.has(element)) { badge.remove(); badges.delete(element); }
+  }
+  function installObserver(win, { save, ledger, changed = () => {}, clock = Date.now, random = uuid, hash = digest, inspect = inspectResponse, imageQuota, pow, account, captureLedger, messageInfoState }) {
     const original = win.fetch;
     let observed = 0;
     const tasks = new Set();
     const run = promise => { tasks.add(promise); promise.catch(() => {}).finally(() => tasks.delete(promise)); };
     function wrapper(...args) {
-      let metaPromise, quotaKind = '', powKind = '', accountKind = '', accountToken, quotaToken, powToken, quotaBase = '', capturedLedger;
+      let metaPromise, quotaKind = '', powKind = '', accountKind = '', accountToken, quotaToken, powToken, quotaBase = '', capturedLedger, historyId = '', messageToken;
       // Capture a cached scalar before native fetch can re-enter page code.
       // No storage read or hashing here; a failed snapshot never falls back.
       if (captureLedger) { try { capturedLedger = captureLedger(); } catch { capturedLedger = null; } }
       // Identity fences cannot be skipped by failures in optional display work.
+      try {
+        // Display privacy fences apply even with manual account-ledger mode.
+        if (messageInfoState && accountRequest(args[0], args[1], win.location.href)) messageInfoState.invalidate();
+      } catch { /* optional display cannot block identity/account checks */ }
       try {
         if (account?.enabled()) {
           accountKind = accountRequest(args[0], args[1], win.location.href);
@@ -465,6 +641,12 @@
         // String parsing, storage reads and all response work happen afterwards.
         if (targetRequest(args[0], args[1], win.location.href)) metaPromise = prepareMeta(args[0], args[1]);
       } catch { /* observation setup may not stop a page request */ }
+      try {
+        if (messageInfoState?.enabled()) {
+          historyId = conversationHistoryRequest(args[0], args[1], win.location.href);
+          if (historyId || metaPromise) messageToken = messageInfoState.capture(historyId);
+        }
+      } catch { /* optional metadata display */ }
       // Reserve generations before native fetch can synchronously trigger an
       // account/navigation fence. Old challenges must not acquire a new epoch.
       try { if (quotaKind) quotaToken = imageQuota.invalidate(); } catch { /* optional display */ }
@@ -475,6 +657,12 @@
       // Every invocation reaches native fetch exactly once with the same this,
       // input/init objects and signal. Optional observer failures are isolated.
       try {
+        if (historyId && messageToken && !nativeThrew) run(Promise.resolve(result).then(async response => {
+          if (!response.ok || response.redirected || !/json/i.test(response.headers.get('content-type') || '')) return;
+          if (response.url && conversationHistoryRequest(response.url, { method: 'GET' }, quotaBase) !== historyId) return;
+          const text = await readBounded(response.clone().body, MAX_BODY, 1500);
+          messageInfoState.history(messageToken, JSON.parse(text));
+        }));
         if (quotaKind) {
           if (quotaKind === 'quota' && !nativeThrew) run(Promise.resolve(result).then(async response => {
             if (!response.ok || response.redirected || !/json/i.test(response.headers.get('content-type') || '')) return;
@@ -499,7 +687,8 @@
           await account.accept(accountToken, JSON.parse(text));
         }));
         if (metaPromise) {
-          const id = random(), at = clock(), book = captureLedger ? capturedLedger : ledger();
+          const id = random(), at = clock();
+          let book; try { book = captureLedger ? capturedLedger : ledger(); } catch { book = null; }
           let event;
           const meta = metaPromise.then(async m => {
             if (m.skip || !shortId(book)) return null;
@@ -513,9 +702,14 @@
             // Clone before the caller can consume its original Response.
             let copy; if (response.ok) { try { copy = response.clone(); } catch { /* unreadable below */ } }
             try {
-              if (!(await meta)) return;
-              patch({ state: response.ok ? 'accepted' : 'failed', http: response.status, observation: response.ok ? 'http' : 'error' });
-              if (copy) await inspect(copy, patch, { alreadyClone: true });
+              let counted = null;
+              try { counted = await meta; } catch { /* display still works if accounting fails */ }
+              if (!counted && !messageToken) return;
+              const safePatch = data => { try { patch(data); } catch { /* accounting cannot stop display parsing */ } };
+              safePatch({ state: response.ok ? 'accepted' : 'failed', http: response.status, observation: response.ok ? 'http' : 'error' });
+              const streamContext = {};
+              const displayAllowed = messageToken && response.ok && !response.redirected && (!response.url || targetRequest(response.url, { method: 'POST' }, quotaBase));
+              if (copy) await inspect(copy, safePatch, { alreadyClone: true, onFrame: displayAllowed ? data => messageInfoState.frame(messageToken, data, streamContext) : undefined });
               else if (response.ok) patch({ observation: 'unreadable' });
             } finally {
               if (copy?.body && !copy.body.locked) { try { Promise.resolve(copy.body.cancel()).catch(() => {}); } catch { /* clone cleanup only */ } }
@@ -771,6 +965,16 @@
     // Local appearance preference, deliberately outside the shared v1 ledger
     // schema: older sync peers cannot drop or overwrite it. Missing/invalid => Pro.
     let hoverMode = 'pro';
+    let messageInfoTimer, messageInfoReadError = false;
+    const messageBadges = new Map();
+    function scheduleMessageInfo() {
+      if (messageInfoTimer) return;
+      messageInfoTimer = setTimeout(() => {
+        messageInfoTimer = null;
+        try { renderMessageInfo(document, messageInfoState, messageBadges); } catch { /* unsupported page DOM: omit badges */ }
+      }, 80);
+    }
+    const messageInfoState = createMessageInfoState({ page: () => win.location.href, changed: scheduleMessageInfo, enabled: false });
     // Transient UI state; never persisted or included in backups/sync.
     const knownCountKeys = new Set(), queuedIncrements = new Map();
     let quotaExpiryTimer;
@@ -825,6 +1029,15 @@
     const showStorageText = () => storageSummary(inspectStorage(), settings, { pending: accountPending(), persistent: hasStorage }) + '\n' + syncDiagnosticText();
     if (diagnostics) diagnostics.inspectStorage = showStorageText;
     const load = () => {
+      // Respect the display preference independently of accounting/other UI reads.
+      // An unreadable first preference leaves display disabled; later errors keep
+      // the last known value rather than silently switching it back on.
+      try {
+        const next = gmGet(`${PREFIX}ui.messageInfo`, true) !== false;
+        const changed = next !== messageInfoState.enabled() || messageInfoReadError;
+        messageInfoReadError = false; messageInfoState.setEnabled(next);
+        if (changed && uiReady) refreshMessageInfoPreference();
+      } catch { messageInfoReadError = true; if (uiReady) refreshMessageInfoPreference(); }
       try {
         const nextHoverMode = gmGet(`${PREFIX}ui.hoverMode`, 'pro') === 'all' ? 'all' : 'pro';
         const nextAutoAccount = gmGet(`${PREFIX}ui.autoAccount`, false) === true;
@@ -963,7 +1176,7 @@
       if (tab === 'settings') {
         const d = new Date(settings.anchor); const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         settingsSnapshot = contextSnapshot();
-        body = `<div class="display-setting"><label id="hover-label">悬浮卡显示</label><div class="segmented" role="group" aria-labelledby="hover-label"><button type="button" id="hover-pro" data-action="hover-pro" aria-pressed="${hoverMode === 'pro'}">仅选择 Pro 时</button><button type="button" id="hover-all" data-action="hover-all" aria-pressed="${hoverMode === 'all'}">所有模型</button></div><small id="hover-status" role="status">${hoverPreferenceHint()}</small></div><div class="display-setting"><label id="account-label">按当前账号自动切换账本</label><div class="segmented" role="group" aria-labelledby="account-label"><button type="button" data-action="account-off" id="account-off" aria-pressed="${!account.enabled()}">手动选择</button><button type="button" data-action="account-on" id="account-on" aria-pressed="${account.enabled()}">实验自动识别</button></div><small id="account-status" role="status">${accountPreferenceHint()}</small></div><form id="settings"><label for="cap">本周期上限（自定义，非官方额度）</label><input id="cap" type="number" min="1" max="1000000" value="${settings.cap}" required><label for="mode">统计方式</label><select id="mode"><option value="fixed"${settings.mode === 'fixed' ? ' selected' : ''}>固定七天周期</option><option value="rolling"${settings.mode === 'rolling' ? ' selected' : ''}>滚动最近七天</option></select><label for="anchor">固定周期锚点（你的浏览器当地时间）</label><input id="anchor" type="datetime-local" value="${local}" required><small>填入你确认的重置时间；每 168 小时一个周期。默认是安装当天零点。滚动模式忽略此项。</small><label for="calibrate">当前已用校准为（首次安装可填写）</label><input id="calibrate" type="number" min="0" max="1000000" placeholder="留空保留现值"><small>会添加一条校准记录，不删除历史；以保存后的统计方式计算差额。</small><label for="ledger">账本</label><select id="ledger"${account.enabled() ? ' disabled' : ''}>${[...new Set(['default', settings.ledger, ...records.map(e => e.ledger)])].map(id => `<option value="${esc(id)}"${id === settings.ledger ? ' selected' : ''}>${id === settings.ledger ? esc(settings.label) : id === 'default' ? '默认账本' : id.startsWith('unassigned:') ? `未分配 ${esc(id.slice(11, 19))}` : esc(id.slice(0, 16))}</option>`).join('')}<option value="__new">新建独立账本…</option></select><small>${account.enabled() ? '账本跟随本标签页识别到的登录用户。同一用户的不同工作区共用账本。' : '手动模式：换账号时请选择独立账本。'} 上限、统计方式和周期锚点仍是共用设置，需自行核对；不会自动推断各账号额度。</small><div class="actions"><button class="primary" type="submit">保存设置</button>${button('home', '取消')}</div></form><div class="foot">修改前自动保存本机备份。不同标签页设置冲突时会提醒刷新。</div>`;
+        body = `<div class="display-setting"><label id="hover-label">悬浮卡显示</label><div class="segmented" role="group" aria-labelledby="hover-label"><button type="button" id="hover-pro" data-action="hover-pro" aria-pressed="${hoverMode === 'pro'}">仅选择 Pro 时</button><button type="button" id="hover-all" data-action="hover-all" aria-pressed="${hoverMode === 'all'}">所有模型</button></div><small id="hover-status" role="status">${hoverPreferenceHint()}</small></div><div class="display-setting"><label id="message-info-label">消息时间与模型</label><div class="segmented" role="group" aria-labelledby="message-info-label"><button type="button" id="message-info-on" data-action="message-info-on" aria-pressed="${messageInfoState.enabled()}">显示</button><button type="button" id="message-info-off" data-action="message-info-off" aria-pressed="${!messageInfoState.enabled()}">隐藏</button></div><small id="message-info-status" role="status">${messageInfoPreferenceHint()}</small></div><div class="display-setting"><label id="account-label">按当前账号自动切换账本</label><div class="segmented" role="group" aria-labelledby="account-label"><button type="button" data-action="account-off" id="account-off" aria-pressed="${!account.enabled()}">手动选择</button><button type="button" data-action="account-on" id="account-on" aria-pressed="${account.enabled()}">实验自动识别</button></div><small id="account-status" role="status">${accountPreferenceHint()}</small></div><form id="settings"><label for="cap">本周期上限（自定义，非官方额度）</label><input id="cap" type="number" min="1" max="1000000" value="${settings.cap}" required><label for="mode">统计方式</label><select id="mode"><option value="fixed"${settings.mode === 'fixed' ? ' selected' : ''}>固定七天周期</option><option value="rolling"${settings.mode === 'rolling' ? ' selected' : ''}>滚动最近七天</option></select><label for="anchor">固定周期锚点（你的浏览器当地时间）</label><input id="anchor" type="datetime-local" value="${local}" required><small>填入你确认的重置时间；每 168 小时一个周期。默认是安装当天零点。滚动模式忽略此项。</small><label for="calibrate">当前已用校准为（首次安装可填写）</label><input id="calibrate" type="number" min="0" max="1000000" placeholder="留空保留现值"><small>会添加一条校准记录，不删除历史；以保存后的统计方式计算差额。</small><label for="ledger">账本</label><select id="ledger"${account.enabled() ? ' disabled' : ''}>${[...new Set(['default', settings.ledger, ...records.map(e => e.ledger)])].map(id => `<option value="${esc(id)}"${id === settings.ledger ? ' selected' : ''}>${id === settings.ledger ? esc(settings.label) : id === 'default' ? '默认账本' : id.startsWith('unassigned:') ? `未分配 ${esc(id.slice(11, 19))}` : esc(id.slice(0, 16))}</option>`).join('')}<option value="__new">新建独立账本…</option></select><small>${account.enabled() ? '账本跟随本标签页识别到的登录用户。同一用户的不同工作区共用账本。' : '手动模式：换账号时请选择独立账本。'} 上限、统计方式和周期锚点仍是共用设置，需自行核对；不会自动推断各账号额度。</small><div class="actions"><button class="primary" type="submit">保存设置</button>${button('home', '取消')}</div></form><div class="foot">修改前自动保存本机备份。不同标签页设置冲突时会提醒刷新。</div>`;
       } else if (tab === 'sync') {
         const cfg = getDav(), davMode = cfg.version === 2 ? cfg.mode : cfg.url ? 'file' : 'base';
         body = `<form id="webdav"><div class="callout">可选：把计数记录、模型标记和周期设置存到你自己的 WebDAV 文件。密码仅在本机 Tampermonkey 存储，不随备份导出；不是加密保险箱。</div><label for="dav-mode">地址模式</label><select id="dav-mode"><option value="base"${davMode === 'base' ? ' selected' : ''}>基础目录（自动建立同步目录）</option><option value="file"${davMode === 'file' ? ' selected' : ''}>完整文件地址（兼容旧配置）</option></select><label id="dav-url-label" for="dav-url">${davMode === 'base' ? 'HTTPS 基础目录' : 'HTTPS 文件完整地址'}</label><input id="dav-url" type="url" value="${esc(cfg.url)}" placeholder="${davMode === 'base' ? 'https://你的服务器/dav/' : 'https://你的服务器/dav/pro-counter.json'}" required autocomplete="off"><small id="dav-path-hint">${davMode === 'base' ? '自动在此地址下建立 ChatGPT-Toolkit/，同步文件为 data.json。' : '保留原文件；切换基础目录前请先同步旧文件并导出备份，不自动搬移远端历史。'}</small><label for="dav-user">用户名</label><input id="dav-user" value="${esc(cfg.username)}" autocomplete="off"><label for="dav-pass">密码 / 专用应用密码</label><input id="dav-pass" type="password" placeholder="${cfg.password ? '已保存；留空保留（更换服务器时会清除）' : '建议使用专用应用密码'}" autocomplete="new-password"><label for="dav-interval">自动同步（仅页面打开时）</label><select id="dav-interval">${[0, 5, 15, 30, 60].map(n => `<option value="${n}"${cfg.interval === n ? ' selected' : ''}>${n ? `每 ${n} 分钟` : '关闭，仅手动'}</option>`).join('')}</select><label><input id="dav-approved" type="checkbox" style="width:auto" ${cfg.approved ? 'checked' : ''}> 我同意按所选模式建立同步目录、上传计数记录和周期设置，并在本机保存凭据。</label><div class="actions"><button type="submit" class="primary">测试并保存</button>${button('sync-now', '立即同步')}${button('sync-off', '关闭自动同步')}${button('sync-clear', '清除本机凭据')}</div></form><div id="sync-status" class="callout" role="status">${esc(syncStatus)}${syncBusy ? ' · 正在处理…' : ''}</div><div class="foot">需要 Tampermonkey 5.5.1+。安装时的任意域名网络权限仅用于你填写的 WebDAV。同步不包含聊天正文、Cookie、令牌或 WebDAV 密码。两台设备使用相同模式和地址。需支持强 ETag / 条件 PUT；不跟随重定向。周期设置按更新时间合并，请确保系统时间准确。</div>`;
@@ -985,6 +1198,15 @@
     function manual(delta, at = Date.now()) {
       if (accountPending()) throw Error('账号待识别，暂不能校准。可关闭自动识别后手动选择账本。');
       const id = uuid(); save({ v: 1, id, key: `m:${id}`, ledger: settings.ledger, at, updated: at, state: 'manual', observation: 'manual', delta, requested: '', route: '', label: '', stable: true, conflict: false, http: 0 });
+    }
+    function messageInfoPreferenceHint() { if (messageInfoReadError) return '显示设置读取失败，保留上次选择；首次加载时暂不显示。请检查本机存储。'; return '仅显示页面自然收到的消息创建时间与响应模型；悬停查看完整时间。缺失时不猜测、不补请求。关闭会清空本页元数据，重新开启后等待自然加载。仅本机设置。'; }
+    function refreshMessageInfoPreference(message = '') {
+      for (const value of ['on', 'off']) root?.querySelector(`#message-info-${value}`)?.setAttribute('aria-pressed', String(messageInfoState.enabled() === (value === 'on')));
+      const status = root?.querySelector('#message-info-status'); if (status) status.textContent = message || messageInfoPreferenceHint();
+    }
+    function setMessageInfoMode(value) {
+      try { verifiedSet(`${PREFIX}ui.messageInfo`, !!value); messageInfoState.setEnabled(value); refreshMessageInfoPreference(); scheduleMessageInfo(); }
+      catch { refreshMessageInfoPreference('未保存：本机存储写入失败，仍保留原显示方式。'); }
     }
     function accountPreferenceHint() {
       return account.enabled() ? `${accountPending() ? '待识别，等待页面自己的会话响应。' : `已识别：${settings.label}。`} 实验功能：失焦、导航或输入区外操作会清除识别；须等网页新的会话响应。不额外查询；散列账本编号随记录导出/同步。旧历史不搬移。` : '实验功能，默认关闭。被动读取用户 ID，生成可跨设备关联的散列账本编号；不提取邮箱或令牌。失焦/导航等操作后可能持续待识别。';
@@ -1017,6 +1239,7 @@
         const b = e.target.closest('button[data-action]'); if (!b) return;
         try {
           const action = b.dataset.action; notice = '';
+          if (action === 'message-info-on' || action === 'message-info-off') { setMessageInfoMode(action === 'message-info-on'); return; }
           if (action === 'account-on' || action === 'account-off') { setAccountMode(action === 'account-on'); return; }
           if (action === 'hover-pro' || action === 'hover-all') { setHoverMode(action === 'hover-all' ? 'all' : 'pro'); return; }
           if (action === 'storage') { dataInspection = inspectStorage(); tab = 'storage'; collapsed = false; render(true); return; }
@@ -1462,7 +1685,7 @@
     try { if (getDav().enabled) { const last = Number(gmGet(`${PREFIX}lastSync`, 0)); syncStatus = last ? `上次同步 ${fmt(last)}` : 'WebDAV 已配置，尚未完成同步'; } } catch { /* show storage diagnosis */ }
     diagnostics?.mark('install-observer');
     try {
-      observer = installObserver(win, { save: saveObserved, ledger: () => { load(); return settings.ledger; }, captureLedger: () => account.enabled() ? account.capture() : settings.ledger, imageQuota, pow, account });
+      observer = installObserver(win, { save: saveObserved, ledger: () => { load(); return settings.ledger; }, captureLedger: () => account.enabled() ? account.capture() : settings.ledger, imageQuota, pow, account, messageInfoState });
       if (diagnostics) diagnostics.state.observer = observer.healthy() ? 'installed' : 'not-active';
     } catch (error) {
       storageError = [storageError, '观察器未成功安装。仍可手动计数；请刷新并检查脚本权限。'].filter(Boolean).join(' ');
@@ -1470,11 +1693,14 @@
       diagnostics?.fail('install-observer', error);
     }
     diagnostics?.mark('mount');
-    safeMount();
+    safeMount(); scheduleMessageInfo();
+    win.addEventListener('popstate', () => { messageInfoState.syncPage(); scheduleMessageInfo(); });
+    win.addEventListener('pagehide', () => messageInfoState.invalidate());
     document.addEventListener('DOMContentLoaded', safeMount, { once: true });
     // React navigation can replace the body or remove our host. Reattach the same roots.
-    try { new MutationObserver(() => { if (quotaPage !== win.location.href) invalidateImageQuota(); if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'style', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target'] }); } catch { /* interval below also recovers */ }
+    try { new MutationObserver(() => { scheduleMessageInfo(); if (quotaPage !== win.location.href) invalidateImageQuota(); if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'style', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target', 'data-message-id', 'data-message-author-role'] }); } catch { /* interval below also recovers */ }
     setInterval(() => {
+      scheduleMessageInfo();
       const mounted = safeMount(); const before = lastKeys, s = settings.id; load();
       if (mounted) { if (before !== lastKeys || s !== settings.id || !document.hidden) render(); }
       bindNativeControls(); if (activeTrigger) updateHover(); else if (quotaPage !== win.location.href || document.hidden) invalidateImageQuota(); positionHover();
@@ -1484,7 +1710,7 @@
     diagnostics?.mark('ready');
   }
   return { WEEK, PREFIX, inspectLocalStorage, storageSummary, completeStorage, modelKind, defaultSettings, validSettings, validEvent, windowFor, kindFor, mergeEvents, grouped, summarize,
-    IMAGE_QUOTA_TTL, imageQuotaRequest, parseImageQuota, createImageQuotaState, powRequest, parsePow, createPowState, accountRequest, parseAccountId, createAccountState, requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, webDavTargets, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
+    conversationPage, conversationHistoryRequest, messageInfo, createMessageInfoState, renderMessageInfo, IMAGE_QUOTA_TTL, imageQuotaRequest, parseImageQuota, createImageQuotaState, powRequest, parsePow, createPowState, accountRequest, parseAccountId, createAccountState, requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, webDavTargets, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
 });
 
 
