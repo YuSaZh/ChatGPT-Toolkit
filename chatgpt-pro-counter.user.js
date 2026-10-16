@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.18
+// @version      1.1.19
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -32,7 +32,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.18', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: '1.1.19', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null, inspectStorage: null, inspectMessageInfo: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -1657,9 +1657,14 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     // Local appearance preference, deliberately outside the shared v1 ledger
     // schema: older sync peers cannot drop or overwrite it. Missing/invalid => Pro.
     let hoverMode = 'pro';
+    // Version safety gate: do not touch the page's module/React/metadata paths.
+    // A full page refresh is required to discard an older installed bridge.
+    const MESSAGE_METADATA_SAFETY_PAUSED = true;
+    let messageInfoPreference = true;
     let messageInfoTimer, messageInfoReadError = false, moduleMetadataBridge;
     const messageBadges = new Map();
     function refreshMessageInfo() {
+      if (MESSAGE_METADATA_SAFETY_PAUSED) return { messageEnabled: 'paused-safety', messageInjection: 'paused-safety', messageBadges: 0, messageNative: 0 };
       const injection = moduleMetadataBridge?.inspect();
       if (diagnostics && injection) Object.assign(diagnostics.state, { messageInjection: [injection.bootstrap, injection.hook, injection.runtime, injection.patch].join(' / '), messageInjectionFactories: injection.factories, messageMappingCandidate: injection.mappingCandidates + ' / ' + injection['mapping-reason'], messageInjectionKinds: [injection['mapping-factory'], injection['message-factory'], injection['boundary-factory']].join(' / '), messageMappingCalls: injection.mappingCalls, messageFetchObserved: injection.fetches, messageObservedMappings: injection.mapping, messageRendererCommits: injection.renderer, messageInjectedLabels: injection.labels, messageInjectionAccount: injection.account + ' / ' + injection['account-fence'] });
       if (moduleMetadataBridge?.active() || injection?.account === 'paused-account') {
@@ -1669,6 +1674,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       return renderMessageInfo(document, messageInfoState, messageBadges);
     }
     function scheduleMessageInfo() {
+      if (MESSAGE_METADATA_SAFETY_PAUSED) return;
       if (messageInfoTimer) return;
       messageInfoTimer = setTimeout(() => {
         messageInfoTimer = null;
@@ -1676,7 +1682,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       }, 200);
     }
     const messageInfoState = createMessageInfoState({ page: () => win.location.href, changed: scheduleMessageInfo, enabled: false });
-    messageInfoState.nativeReader(document);
+    if (!MESSAGE_METADATA_SAFETY_PAUSED) messageInfoState.nativeReader(document);
     if (diagnostics) diagnostics.inspectMessageInfo = () => refreshMessageInfo();
     // Transient UI state; never persisted or included in backups/sync.
     const knownCountKeys = new Set(), queuedIncrements = new Map();
@@ -1737,8 +1743,8 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       // the last known value rather than silently switching it back on.
       try {
         const next = gmGet(`${PREFIX}ui.messageInfo`, true) !== false;
-        const changed = next !== messageInfoState.enabled() || messageInfoReadError;
-        messageInfoReadError = false; messageInfoState.setEnabled(next);
+        const changed = next !== messageInfoPreference || messageInfoReadError;
+        messageInfoPreference = next; messageInfoReadError = false; messageInfoState.setEnabled(!MESSAGE_METADATA_SAFETY_PAUSED && next);
         if (changed && uiReady) refreshMessageInfoPreference();
       } catch { messageInfoReadError = true; if (uiReady) refreshMessageInfoPreference(); }
       try {
@@ -1879,7 +1885,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       if (tab === 'settings') {
         const d = new Date(settings.anchor); const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         settingsSnapshot = contextSnapshot();
-        body = `<div class="display-setting"><label id="hover-label">悬浮卡显示</label><div class="segmented" role="group" aria-labelledby="hover-label"><button type="button" id="hover-pro" data-action="hover-pro" aria-pressed="${hoverMode === 'pro'}">仅选择 Pro 时</button><button type="button" id="hover-all" data-action="hover-all" aria-pressed="${hoverMode === 'all'}">所有模型</button></div><small id="hover-status" role="status">${hoverPreferenceHint()}</small></div><div class="display-setting"><label id="message-info-label">消息时间与模型</label><div class="segmented" role="group" aria-labelledby="message-info-label"><button type="button" id="message-info-on" data-action="message-info-on" aria-pressed="${messageInfoState.enabled()}">显示</button><button type="button" id="message-info-off" data-action="message-info-off" aria-pressed="${!messageInfoState.enabled()}">隐藏</button></div><small id="message-info-status" role="status">${messageInfoPreferenceHint()}</small></div><div class="display-setting"><label id="account-label">按当前账号自动切换账本</label><div class="segmented" role="group" aria-labelledby="account-label"><button type="button" data-action="account-off" id="account-off" aria-pressed="${!account.enabled()}">手动选择</button><button type="button" data-action="account-on" id="account-on" aria-pressed="${account.enabled()}">实验自动识别</button></div><small id="account-status" role="status">${accountPreferenceHint()}</small></div><form id="settings"><label for="cap">本周期上限（自定义，非官方额度）</label><input id="cap" type="number" min="1" max="1000000" value="${settings.cap}" required><label for="mode">统计方式</label><select id="mode"><option value="fixed"${settings.mode === 'fixed' ? ' selected' : ''}>固定七天周期</option><option value="rolling"${settings.mode === 'rolling' ? ' selected' : ''}>滚动最近七天</option></select><label for="anchor">固定周期锚点（你的浏览器当地时间）</label><input id="anchor" type="datetime-local" value="${local}" required><small>填入你确认的重置时间；每 168 小时一个周期。默认是安装当天零点。滚动模式忽略此项。</small><label for="calibrate">当前已用校准为（首次安装可填写）</label><input id="calibrate" type="number" min="0" max="1000000" placeholder="留空保留现值"><small>会添加一条校准记录，不删除历史；以保存后的统计方式计算差额。</small><label for="ledger">账本</label><select id="ledger"${account.enabled() ? ' disabled' : ''}>${[...new Set(['default', settings.ledger, ...records.map(e => e.ledger)])].map(id => `<option value="${esc(id)}"${id === settings.ledger ? ' selected' : ''}>${id === settings.ledger ? esc(settings.label) : id === 'default' ? '默认账本' : id.startsWith('unassigned:') ? `未分配 ${esc(id.slice(11, 19))}` : esc(id.slice(0, 16))}</option>`).join('')}<option value="__new">新建独立账本…</option></select><small>${account.enabled() ? '账本跟随本标签页识别到的登录用户。同一用户的不同工作区共用账本。' : '手动模式：换账号时请选择独立账本。'} 上限、统计方式和周期锚点仍是共用设置，需自行核对；不会自动推断各账号额度。</small><div class="actions"><button class="primary" type="submit">保存设置</button>${button('home', '取消')}</div></form><div class="foot">修改前自动保存本机备份。不同标签页设置冲突时会提醒刷新。</div>`;
+        body = `<div class="display-setting"><label id="hover-label">悬浮卡显示</label><div class="segmented" role="group" aria-labelledby="hover-label"><button type="button" id="hover-pro" data-action="hover-pro" aria-pressed="${hoverMode === 'pro'}">仅选择 Pro 时</button><button type="button" id="hover-all" data-action="hover-all" aria-pressed="${hoverMode === 'all'}">所有模型</button></div><small id="hover-status" role="status">${hoverPreferenceHint()}</small></div><div class="display-setting"><label id="message-info-label">消息时间与模型</label><div class="segmented" role="group" aria-labelledby="message-info-label"><button type="button" id="message-info-on" data-action="message-info-on" aria-pressed="${messageInfoPreference}"${MESSAGE_METADATA_SAFETY_PAUSED ? ' disabled' : ''}>显示</button><button type="button" id="message-info-off" data-action="message-info-off" aria-pressed="${!messageInfoPreference}"${MESSAGE_METADATA_SAFETY_PAUSED ? ' disabled' : ''}>隐藏</button></div><small id="message-info-status" role="status">${messageInfoPreferenceHint()}</small></div><div class="display-setting"><label id="account-label">按当前账号自动切换账本</label><div class="segmented" role="group" aria-labelledby="account-label"><button type="button" data-action="account-off" id="account-off" aria-pressed="${!account.enabled()}">手动选择</button><button type="button" data-action="account-on" id="account-on" aria-pressed="${account.enabled()}">实验自动识别</button></div><small id="account-status" role="status">${accountPreferenceHint()}</small></div><form id="settings"><label for="cap">本周期上限（自定义，非官方额度）</label><input id="cap" type="number" min="1" max="1000000" value="${settings.cap}" required><label for="mode">统计方式</label><select id="mode"><option value="fixed"${settings.mode === 'fixed' ? ' selected' : ''}>固定七天周期</option><option value="rolling"${settings.mode === 'rolling' ? ' selected' : ''}>滚动最近七天</option></select><label for="anchor">固定周期锚点（你的浏览器当地时间）</label><input id="anchor" type="datetime-local" value="${local}" required><small>填入你确认的重置时间；每 168 小时一个周期。默认是安装当天零点。滚动模式忽略此项。</small><label for="calibrate">当前已用校准为（首次安装可填写）</label><input id="calibrate" type="number" min="0" max="1000000" placeholder="留空保留现值"><small>会添加一条校准记录，不删除历史；以保存后的统计方式计算差额。</small><label for="ledger">账本</label><select id="ledger"${account.enabled() ? ' disabled' : ''}>${[...new Set(['default', settings.ledger, ...records.map(e => e.ledger)])].map(id => `<option value="${esc(id)}"${id === settings.ledger ? ' selected' : ''}>${id === settings.ledger ? esc(settings.label) : id === 'default' ? '默认账本' : id.startsWith('unassigned:') ? `未分配 ${esc(id.slice(11, 19))}` : esc(id.slice(0, 16))}</option>`).join('')}<option value="__new">新建独立账本…</option></select><small>${account.enabled() ? '账本跟随本标签页识别到的登录用户。同一用户的不同工作区共用账本。' : '手动模式：换账号时请选择独立账本。'} 上限、统计方式和周期锚点仍是共用设置，需自行核对；不会自动推断各账号额度。</small><div class="actions"><button class="primary" type="submit">保存设置</button>${button('home', '取消')}</div></form><div class="foot">修改前自动保存本机备份。不同标签页设置冲突时会提醒刷新。</div>`;
       } else if (tab === 'sync') {
         const cfg = getDav(), davMode = cfg.version === 2 ? cfg.mode : cfg.url ? 'file' : 'base';
         body = `<form id="webdav"><div class="callout">可选：把计数记录、模型标记和周期设置存到你自己的 WebDAV 文件。密码仅在本机 Tampermonkey 存储，不随备份导出；不是加密保险箱。</div><label for="dav-mode">地址模式</label><select id="dav-mode"><option value="base"${davMode === 'base' ? ' selected' : ''}>基础目录（自动建立同步目录）</option><option value="file"${davMode === 'file' ? ' selected' : ''}>完整文件地址（兼容旧配置）</option></select><label id="dav-url-label" for="dav-url">${davMode === 'base' ? 'HTTPS 基础目录' : 'HTTPS 文件完整地址'}</label><input id="dav-url" type="url" value="${esc(cfg.url)}" placeholder="${davMode === 'base' ? 'https://你的服务器/dav/' : 'https://你的服务器/dav/pro-counter.json'}" required autocomplete="off"><small id="dav-path-hint">${davMode === 'base' ? '自动在此地址下建立 ChatGPT-Toolkit/，同步文件为 data.json。' : '保留原文件；切换基础目录前请先同步旧文件并导出备份，不自动搬移远端历史。'}</small><label for="dav-user">用户名</label><input id="dav-user" value="${esc(cfg.username)}" autocomplete="off"><label for="dav-pass">密码 / 专用应用密码</label><input id="dav-pass" type="password" placeholder="${cfg.password ? '已保存；留空保留（更换服务器时会清除）' : '建议使用专用应用密码'}" autocomplete="new-password"><label for="dav-interval">自动同步（仅页面打开时）</label><select id="dav-interval">${[0, 5, 15, 30, 60].map(n => `<option value="${n}"${cfg.interval === n ? ' selected' : ''}>${n ? `每 ${n} 分钟` : '关闭，仅手动'}</option>`).join('')}</select><label><input id="dav-approved" type="checkbox" style="width:auto" ${cfg.approved ? 'checked' : ''}> 我同意按所选模式建立同步目录、上传计数记录和周期设置，并在本机保存凭据。</label><div class="actions"><button type="submit" class="primary">测试并保存</button>${button('sync-now', '立即同步')}${button('sync-off', '关闭自动同步')}${button('sync-clear', '清除本机凭据')}</div></form><div id="sync-status" class="callout" role="status">${esc(syncStatus)}${syncBusy ? ' · 正在处理…' : ''}</div><div class="foot">需要 Tampermonkey 5.5.1+。安装时的任意域名网络权限仅用于你填写的 WebDAV。同步不包含聊天正文、Cookie、令牌或 WebDAV 密码。两台设备使用相同模式和地址。需支持强 ETag / 条件 PUT；不跟随重定向。周期设置按更新时间合并，请确保系统时间准确。</div>`;
@@ -1902,13 +1908,14 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       if (accountPending()) throw Error('账号待识别，暂不能校准。可关闭自动识别后手动选择账本。');
       const id = uuid(); save({ v: 1, id, key: `m:${id}`, ledger: settings.ledger, at, updated: at, state: 'manual', observation: 'manual', delta, requested: '', route: '', label: '', stable: true, conflict: false, http: 0 });
     }
-    function messageInfoPreferenceHint() { if (messageInfoReadError) return '显示设置读取失败，保留上次选择；首次加载时暂不显示。请检查本机存储。'; return '显示已加载消息的创建时间与响应模型；悬停查看完整时间。仅本机设置。'; }
+    function messageInfoPreferenceHint() { if (MESSAGE_METADATA_SAFETY_PAUSED) return '本版因页面兼容问题暂停此功能，原显示设置已保留。'; if (messageInfoReadError) return '显示设置读取失败，保留上次选择；首次加载时暂不显示。请检查本机存储。'; return '显示已加载消息的创建时间与响应模型；悬停查看完整时间。仅本机设置。'; }
     function refreshMessageInfoPreference(message = '') {
-      for (const value of ['on', 'off']) root?.querySelector(`#message-info-${value}`)?.setAttribute('aria-pressed', String(messageInfoState.enabled() === (value === 'on')));
+      for (const value of ['on', 'off']) root?.querySelector(`#message-info-${value}`)?.setAttribute('aria-pressed', String(messageInfoPreference === (value === 'on')));
       const status = root?.querySelector('#message-info-status'); if (status) status.textContent = message || messageInfoPreferenceHint();
     }
     function setMessageInfoMode(value) {
-      try { verifiedSet(`${PREFIX}ui.messageInfo`, !!value); messageInfoState.setEnabled(value); refreshMessageInfoPreference(); scheduleMessageInfo(); }
+      if (MESSAGE_METADATA_SAFETY_PAUSED) { refreshMessageInfoPreference(); return; }
+      try { verifiedSet(`${PREFIX}ui.messageInfo`, !!value); messageInfoPreference = !!value; messageInfoState.setEnabled(value); refreshMessageInfoPreference(); scheduleMessageInfo(); }
       catch { refreshMessageInfoPreference('未保存：本机存储写入失败，仍保留原显示方式。'); }
     }
     function accountPreferenceHint() {
@@ -2414,13 +2421,13 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     diagnostics?.mark('load-storage');
     load();
     try { if (getDav().enabled) { const last = Number(gmGet(`${PREFIX}lastSync`, 0)); syncStatus = last ? `上次同步 ${fmt(last)}` : 'WebDAV 已配置，尚未完成同步'; } } catch { /* show storage diagnosis */ }
-    try {
+    if (!MESSAGE_METADATA_SAFETY_PAUSED) try {
       moduleMetadataBridge = startPageMetadataBridge(win, document, { runtimeSource: pageMetadataRuntime.toString(), transformerSource: metadataTransformerSource, enabled: messageInfoState.enabled(), changed: scheduleMessageInfo });
       messageInfoState.moduleBridge(moduleMetadataBridge);
     } catch { if (diagnostics) diagnostics.state.messageInjection = 'bootstrap-failed'; }
     diagnostics?.mark('install-observer');
     try {
-      observer = installObserver(win, { save: saveObserved, ledger: () => { load(); return settings.ledger; }, captureLedger: () => account.enabled() ? account.capture() : settings.ledger, imageQuota, pow, account, messageInfoState });
+      observer = installObserver(win, { save: saveObserved, ledger: () => { load(); return settings.ledger; }, captureLedger: () => account.enabled() ? account.capture() : settings.ledger, imageQuota, pow, account, messageInfoState: MESSAGE_METADATA_SAFETY_PAUSED ? undefined : messageInfoState });
       if (diagnostics) diagnostics.state.observer = observer.healthy() ? 'installed' : 'not-active';
     } catch (error) {
       storageError = [storageError, '观察器未成功安装。仍可手动计数；请刷新并检查脚本权限。'].filter(Boolean).join(' ');

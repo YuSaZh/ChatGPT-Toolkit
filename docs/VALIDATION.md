@@ -1,5 +1,13 @@
 # ChatGPT Toolkit 验证记录
 
+## 1.1.19 SSR 安全回退验证
+
+- 实际错误日志共 18 次 ERR_BLOCKED_BY_CLIENT，全部为统计上报 /ces/v1/rgstr，约 30 秒；每个请求栈中 Toolkit 两个观察层各一次，没有同步递归 / Maximum update depth / RangeError 证据。另有一次 React #418。只记录脱敏统计，不发布原始用户日志。
+- [React 官方 #418](https://react.dev/errors/418) 指服务端内容与客户端 hydration 不匹配，并可能重建组件树。独立真实 React 19.2 SSR → hydrateRoot 实验：额外用户消息 Fragment 使嵌套 useId 从服务端路径变化，引发 text mismatch；助手 sourcesAction 的 truthy Fragment 也能使条件操作栏新增，引发 HTML mismatch。Label 返回 null、甚至不读取 mapping 时仍可能发生，单独关闭显示不足以修复。
+- 本版在完整脚本启动入口禁止 metadata bridge / 原生读取 / 标签挂载，不写原显示偏好；保留计数、备份、WebDAV 和悬停。测试覆盖页面注入零安装、原 Function.call 不变、仅原计数 fetch 观察层、旧消息响应不采集 / 不挂标签、偏好与账本原值保留。
+- 完整根回归 536 项通过；真实 React 两套运行时以及页面桥 / SSR / 完整启动安全闸共 31 项通过。语法与生成一致性检查通过。SSR 反例仅在测试中显式调用已停用的旧模块，生产启动不得执行该路径。
+- 这是已复现结构风险的安全回退，不宣称用户的全部 #418 或统计拦截错误都来自本工具，也不保证关闭它会停止网站自己的统计重试。原始用户页面布局、其他扩展组合仍未实际验收。
+
 ## 1.1.18 数据入口与页面语义验证
 
 - 用户 1.1.17 诊断显示页面 ack / webpack / 工厂注入已运行，两个目标模块、9 次原生挂载，但没有 mapping；账号观察显示 ready / not-active。由此不再把整段 bootstrap 失败作为本次解释。具体数据模块源码尚不可见，两个模块可能来自 AST 拒绝或早已缓存，新增分项状态用于区分。

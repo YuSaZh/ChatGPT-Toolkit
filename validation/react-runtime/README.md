@@ -27,3 +27,9 @@ Primary-source explanation: [React's current-Fiber resolver](https://github.com/
 `serialized-page-runtime.test.cjs` executes the actual serialized runtime in a separate jsdom page realm. It checks strict component receivers, strict factory compilation, one original mapping invocation and argument evaluation order, transparent errors, wrapped fetch identity confirmed only by a natural call, sticky account pause, and an unreachable fetch wrapper that must leave labels hidden without probing the network. The full module fixture uses an outer captured conversation ID rejected by the previous AST rule.
 
 `npm test` also runs 10 bootstrap and 10 account-fence tests, including delayed nonce acknowledgement and pre-ack account boundaries. The six serialization tests bring these page-runtime tests to 26. These are runtime regressions with synthetic module sources, not evidence that the user's actual ChatGPT factory has the same source.
+
+## Safety pause and SSR regression (1.1.19)
+
+The installed userscript now skips the metadata bridge and all metadata DOM display paths. `safety-rollback.test.cjs` runs the complete release in real jsdom DOM with both saved display preferences: no inline metadata script/meta, no Function.call replacement, no new metadata fetch layer, no boot requests or storage writes, and no metadata history cloning or labels after SPA navigation. The original counter observer remains.
+
+`hydration-regression.test.cjs` deliberately invokes the dormant bridge only in a test to reproduce the unsafe behavior: nested native useId text and conditional empty sourcesAction both cause hydration mismatches, even with display disabled. These three SSR tests explain why this version bypasses the bridge rather than merely hiding labels. They are expected-failure reproductions with assertions, not permission to enable the old bridge.

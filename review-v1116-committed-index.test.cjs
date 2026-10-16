@@ -77,6 +77,6 @@ test('page realm: bootstrap reads page-owned elements when sandbox document view
   } });
   e.flush(); assert.equal(e.rendered(), true); assert.deepEqual(e.errors, []);
   e.menus.find(m => m.label === '诊断 Pro 计数器').fn();
-  assert.match(e.alerts.at(-1), /消息页面范围: conversation/);
+  assert.match(e.alerts.at(-1), /消息信息: paused-safety/);
   assert.match(e.alerts.at(-1), /原始页面锚点:/);
 });

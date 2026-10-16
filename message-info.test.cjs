@@ -78,15 +78,16 @@ test('DOM matches message IDs and roles, updates without duplication and survive
   assistant.remove(); api.renderMessageInfo(doc, state, badges); assert.equal(badges.size, 1);
   state.setEnabled(false); api.renderMessageInfo(doc, state, badges); assert.equal(badges.size, 0); assert.equal(user.textContent, '');
 });
-test('boot local setting defaults on, persists false separately and creates no requests', () => {
+test('safety-paused display preserves default preference without storing changes or requests', () => {
   let calls = 0;
   const env = environment({ fetch() { calls++; return Promise.resolve(response({})); } });
   env.flush(100); env.tick(); assert.equal(calls, 0);
   env.emit(env.ui(), 'click', { target: env.ui().querySelector('[data-action="expand"]') });
   const button = env.ui().querySelector('[data-action="settings"]'); env.emit(env.ui(), 'click', { target: button });
   const off = env.ui().querySelector('[data-action="message-info-off"]'); assert.ok(off); env.emit(env.ui(), 'click', { target: off });
-  assert.equal(env.store.get('gpc.v1.ui.messageInfo'), false); assert.equal(calls, 0);
-  assert.equal(env.ui().querySelector('#message-info-off').getAttribute('aria-pressed'), 'true');
+  assert.equal(env.store.has('gpc.v1.ui.messageInfo'), false); assert.equal(calls, 0);
+  assert.notEqual(off.getAttribute('disabled'), null); assert.match(env.ui().querySelector('#message-info-status').textContent, /本版因页面兼容问题暂停/);
+  assert.equal(env.ui().querySelector('#message-info-off').getAttribute('aria-pressed'), 'false');
   assert.equal(api.snapshot(api.defaultSettings(), []).messageInfo, undefined);
 });
 test('unchanged DOM badges skip date formatting during unrelated streaming mutations', () => {
