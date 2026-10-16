@@ -96,5 +96,6 @@ test('page account fence: outer request notifications are deduplicated but expli
 
 test('page account fence: non-writable fetch fails closed without changing the native function', () => {
   const e = setup({ locked: true });
-  try { assert.equal(e.w.fetch, e.original); assert.equal(e.read('account-fence'), 'not-active'); assert.equal(e.read('account'), 'paused-account'); assert.notEqual(e.observe(), '1'); assert.equal(e.calls.length, 0); } finally { e.close(); }
+  try { assert.equal(e.w.fetch, e.original); assert.equal(e.read('account-fence'), 'unconfirmed'); assert.equal(e.read('account'), 'waiting-fence'); assert.equal(e.observe(), '1'); assert.equal(e.read('fetches'), '0'); assert.equal(e.calls.length, 0); } finally { e.close(); }
 });
+

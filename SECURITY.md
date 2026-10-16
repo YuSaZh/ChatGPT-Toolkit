@@ -1,20 +1,20 @@
 # ChatGPT Toolkit：被动观察与网络行为审查
 
-## 1.1.17 只读元数据模块注入
+## 1.1.18 只读元数据模块注入
 
 独立 MIT 实现；内置 MIT Acorn 解析器，不从远端下载代码。document-start 向同一页面插入本地脚本，使用页面已有 nonce，并以实际执行 ack 判断成功。短暂观察 Function.prototype.call 以定位自然执行的 webpack；随后只在唯一识别的 mapping / message / conversation 工厂插入元数据显示逻辑。工厂未匹配、含歧义、已缓存执行或编译失败则不替换；不会主动 require / import 模块，也不会失败后重跑已经执行的原工厂。
 
-mapping 包装观察原生 getter 已返回的同一对象，不调用 scope.get / watch / getSnapshot，不读聊天 content。用户消息 UI 在原生一次 render 后加独立 Label；助手只浅复制 props 的 sourcesAction 展示槽，原来源按钮和回调保持。时间 / 模型更新只触发本工具 Label，不重执行原生组件。Label 有自己的错误边界和格式化保护。React 仅来自原生已加载的导出，不调用导出访问器。
+mapping 包装替代原本同一次 getter 调用，按原顺序只求值一次 callee / selector / 会话 ID，再原样转发、观察返回的同一对象；支持闭包及局部 ID，不额外调用 scope.get / watch / getSnapshot，不读聊天 content。原异常、返回引用与 this 语义保留。序列化 runtime 函数体及编译脚本明确保留严格模式。用户消息 UI 在原生一次 render 后加独立 Label；助手只浅复制 props 的 sourcesAction 展示槽，原来源按钮和回调保持。时间 / 模型更新只触发本工具 Label，不重执行原生组件。Label 有自己的错误边界和格式化保护。React 仅来自原生已加载的导出，不调用导出访问器。
 
 页面桥只暴露元数据旁读、UI 包装和短时工厂编译接收，不暴露 GM、账本或凭据。DOM 控制桥仅传固定 on/off/reset/route；可分享诊断只含阶段和数量，不含 nonce、源码、账号、会话、模型或聊天内容。显示默认值在首次模块执行前传入。关闭仅隐藏；标量缓存最多 500 条、RAM-only，供原生 memo selector 不重算时返回历史，不写计数/导出/备份/WebDAV。
 
 账号清理采用 sticky epoch：尚未观察任何 mapping/lease 且未发生显式账号边界时，session / accounts / me 的启动 GET 可作为初始化清理；此后会话/账号边界一律清空并暂停注入标签直至用户自然刷新，防止首次迟到的旧响应冒充新源。等待 page ack 时也保存清理命令并先重放，不能漏掉跨账号边界。pagehide 清空；不主动刷新。保守暂停可能发生于普通后续 session 检查，诊断显示 paused-account。旧 DOM / 已提交 Fiber / 被动响应仅作兼容回退；模块显示激活或账号暂停后不叠加回退标签。
 
-原有自然响应副本、账本和 WebDAV 逻辑保持；页面桥独立安装极小 fetch Proxy，仅辨认同源账号路径、在原生调用前清理标量，直接原样返回原 Promise/错误，不 clone、then 或补请求；该 fence 读回失败时暂停标签。外层观察器发来的 request 类清理在页面 fence 已安装时忽略以免双清理，显式/生命周期清理不忽略。账号路径支持字符串、原生 URL/Request；不执行任意 URL/方法访问器或字符串化，auth init 的未知方法保守清理。语音开始按钮的悬停支持保持，不点击、不启用麦克风、不拦截原生动作。真实用户登录页、扩展 CSP / realm 和实际布局未验收；失败保留原模块而不补请求。
+原有自然响应副本、账本和 WebDAV 逻辑保持；页面桥独立安装极小 fetch Proxy，仅辨认同源账号路径、在原生调用前清理标量，直接原样返回原 Promise/错误，不 clone、then 或补请求；读回身份一致或页面自然调用确实到达 Proxy 后才确认 fence。读回不一致但未证明到达时，状态为 waiting-fence / unconfirmed，标签保持隐藏；不发探测请求。自然到达只能解除该未确认状态，真正账号暂停仍不可恢复。外层观察器发来的 request 类清理在页面 fence 已安装时忽略以免双清理，显式/生命周期清理不忽略。账号路径支持字符串、原生 URL/Request；不执行任意 URL/方法访问器或字符串化，auth init 的未知方法保守清理。语音开始按钮的悬停支持保持，不点击、不启用麦克风、不拦截原生动作。真实用户登录页、扩展 CSP / realm 和实际布局未验收；失败保留原模块而不补请求。
 
 ## ChatGPT：只观察已有请求，不发起请求
 
-- 唯一的页面 fetch 调用位置在 `installObserver` 内，使用 `Reflect.apply(original, this, args)` 转发网页自己发起的调用。每次进入恰好转发一次；不创建额外 fetch、不重试、不自动发消息、不点击模型 / 工具 / 发送按钮。
+- 原计数观察器 `installObserver` 与上述独立页面账号 fence 都只通过 `Reflect.apply` 转发网页自己发起的调用。每层进入恰好向下一层转发一次，底层原生 fetch 仍仅执行一次；不创建额外 fetch、不重试、不自动发消息、不点击模型 / 工具 / 发送按钮。
 - 保留原 `this`、参数对象、Request、init、headers、body、credentials 和 AbortSignal，不改写任何字段。直接返回原 Promise；原 Response、原始异步拒绝和同步抛错保持不变。
 - 原 fetch 前只做受保护的请求分类、已有 Request 的 clone、缓存账本标量快照和内存状态代次失效，避免同步重入把旧请求关联到新账号。不会在此时读写聊天正文或等待哈希 / 网络；字符串 JSON 解析和响应读取在转发后。身份栅栏与图片 / PoW 辅助功能分别隔离，任一可选助手失败仍转发原调用。账本快照失败不回退到其他账号。
 - 响应只读取 clone。不会读取、取消或替换网页持有的 Response body。观察超时只取消副本分支，不调用页面请求的 abort，也不等待副本取消完成。

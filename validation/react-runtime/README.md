@@ -21,3 +21,9 @@ Primary-source explanation: [React's current-Fiber resolver](https://github.com/
 ## Passive module injection path (1.1.17)
 
 `node run-module.cjs` executes the bundled page-world runtime through real local inline scripts in jsdom, then naturally executes source-compatible webpack factories. It uses genuine React components, not synthetic Fibers. Checks cover page acknowledgement, boundary-before-message load order, mapping identity, committed conversation leases, source-action labels, cached history round trips, display toggle isolation, formatting faults, account pause and zero network. `npm test` runs both runtime suites. This does not claim to validate a logged-in ChatGPT build, browser layout, CSP enforcement or Tampermonkey.
+
+## Serialized page-world regression (1.1.18)
+
+`serialized-page-runtime.test.cjs` executes the actual serialized runtime in a separate jsdom page realm. It checks strict component receivers, strict factory compilation, one original mapping invocation and argument evaluation order, transparent errors, wrapped fetch identity confirmed only by a natural call, sticky account pause, and an unreachable fetch wrapper that must leave labels hidden without probing the network. The full module fixture uses an outer captured conversation ID rejected by the previous AST rule.
+
+`npm test` also runs 10 bootstrap and 10 account-fence tests, including delayed nonce acknowledgement and pre-ack account boundaries. The six serialization tests bring these page-runtime tests to 26. These are runtime regressions with synthetic module sources, not evidence that the user's actual ChatGPT factory has the same source.

@@ -2,7 +2,7 @@
   "name": "chatgpt-toolkit-react-runtime-validation",
   "private": true,
   "version": "1.0.0",
-  "scripts": { "test": "node run.cjs && node run-module.cjs && node --test module-bootstrap.test.cjs module-account-fence.test.cjs" },
+  "scripts": { "test": "node run.cjs && node run-module.cjs && node --test module-bootstrap.test.cjs module-account-fence.test.cjs serialized-page-runtime.test.cjs" },
   "devDependencies": {
     "esbuild": "0.25.12",
     "jsdom": "26.1.0",
@@ -10,3 +10,4 @@
     "react-dom": "19.2.0"
   }
 }
+

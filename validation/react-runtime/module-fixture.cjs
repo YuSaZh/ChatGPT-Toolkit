@@ -9,7 +9,7 @@ let mappings={'local-a':{question:{message:raw('question','user')},answer:{messa
 const originalProps=[], nativeCalls=[];const action=()=>{window.__moduleMetrics.actions++};window.__moduleMetrics={originalProps,nativeCalls,actions:0,action};
 const modules={
  metrics(m){m.exports=window.__moduleMetrics}, react(m){m.exports=React}, jsx(m){m.exports={jsx,jsxs}}, selectors(m){m.exports={mapping:{token:true}}},
- content(m,e,r){var S=r('selectors');e.read=(get,cid)=>{let value=get(S.mapping,cid);return{mapping:value,context_truncation_continuation:0,getRenderTelemetry:0,isStreaming:false}}},
+ content(m,e,r){var S=r('selectors');e.read=(get,cid)=>(cid=>get=>{let value=get(S.mapping,cid);return{mapping:value,context_truncation_continuation:0,getRenderTelemetry:0,isStreaming:false}})(cid)(get)},
  boundary(m,e,r){var R=r('react'),J=r('jsx');r.d(e,{render:()=>Turns});function Turns(props){return (0,J.jsx)('main',{id:'pending-chatgpt-submit',timestampSeparatorAtMs:props.time,children:props.children})}},
  messages(m,e,r){var R=r('react'),J=r('jsx'),M=r('metrics');
   e.copyPlainTextFromSource=0;e.suppressCopyTurnToClipboardAnalytics=0;e.getCopyHtml=0;
@@ -29,3 +29,4 @@ function render(){flushSync(()=>root.render(React.createElement(App)));}
 function inspect(){return{labels:[...document.querySelectorAll('[data-chatgpt-toolkit-info]')].map(x=>x.textContent),nativeGets,nativeCalls:nativeCalls.length,rendering,legacyNodes:document.querySelectorAll('[data-message-id][data-message-author-role]').length,props:originalProps.length,actions:window.__moduleMetrics.actions,actionIdentity:originalProps.filter(p=>p.assistantItem).every(p=>p.sourcesAction.props.children[0].props.onClick===window.__moduleMetrics.action),status:Object.fromEntries([...document.getElementById('bridge-test_status').attributes].filter(x=>x.name.startsWith('data-')).map(x=>[x.name,x.value]))};}
 window.moduleFixture={render,inspect,route(cid,bid){conversation=cid;browser=bid;if(!mappings[cid])mappings[cid]={question:{message:raw('question','user')},answer:{message:raw('answer','assistant')}};history.replaceState(null,'','/c/'+bid);render()},fresh(){mappings[conversation]={question:{message:raw('question','user')},answer:{message:raw('answer','assistant')}};cache.delete(conversation);render()},reobserveOld(){cache.delete(conversation);render()},hide(value,css=false){hide=value;cssHide=css;render()},throwOriginal(error){return content.read(()=>{throw error},conversation)},unmount(){flushSync(()=>root.unmount())}};
 render();
+

@@ -1,7 +1,9 @@
 'use strict';
-// Independent page-world metadata bridge. No GM API, application getter,
-// module import, network API, or request payload is reachable from this closure.
+// Independent, unprivileged page-world display bridge. Original selector/fetch
+// calls are forwarded only at their natural call sites; no extra calls are made.
+// The bridge has no GM API, ledger, WebDAV, credentials, or message-body access.
 function pageMetadataRuntime(config, transformFactory) {
+  'use strict';
   const win = window, doc = document, status = doc.getElementById(config.statusId);
   if (!status || win[config.key]) return;
   const descriptor = (object, key) => {
@@ -12,8 +14,9 @@ function pageMetadataRuntime(config, transformFactory) {
   const model = value => typeof value === 'string' && /^[a-z0-9][a-z0-9._:-]{0,119}$/i.test(value) ? value : '';
   const pageId = () => { try { return id(new URL(win.location.href).pathname.match(/\/c\/([^/]+)\/?$/)?.[1]); } catch { return ''; } };
   const mark = (name, value) => { try { status.setAttribute('data-' + name, String(value)); } catch {} };
-  const counts = { mapping: 0, renderer: 0, labels: 0, factories: 0 };
+  const counts = { mapping: 0, renderer: 0, labels: 0, factories: 0, fetches: 0, mappingCalls: 0, mappingCandidates: 0 };
   const count = name => mark(name, ++counts[name]);
+  for (const name of Object.keys(counts)) mark(name, 0);
   let enabled = !!config.enabled, epoch = 0, accountPaused = false, accountBoundarySeen = false, everObserved = false, accountFence = false, React, Context, LabelGuard, nativeRuntime, pendingFactory, accepting = false, queued = false;
   const rows = new Map(), listeners = new Set(), epochs = new WeakMap(), leases = new Set();
   const seen = object => { if (!epochs.has(object)) epochs.set(object, epoch); return epochs.get(object) === epoch; };
@@ -56,8 +59,13 @@ function pageMetadataRuntime(config, transformFactory) {
     } catch { mark('read', 'unsupported'); }
     return value;
   }
+  function observeCall(get, selector, conversation) {
+    // Replaces this one original invocation; never calls a selector on its own.
+    const value = Reflect.apply(get, undefined, [selector, conversation]);
+    count('mappingCalls'); return observe(value, conversation);
+  }
   function snapshot(identity, lease) {
-    if (accountPaused || !enabled || !lease?.committed || !leases.has(lease) || lease.epoch !== epoch || !identity || identity.hidden) return '';
+    if (accountPaused || !accountFence || !enabled || !lease?.committed || !leases.has(lease) || lease.epoch !== epoch || !identity || identity.hidden) return '';
     const current = pageId();
     if (!current || identity.conversation !== lease.internal || (lease.browser || lease.internal) !== current) return '';
     const row = rows.get(identity.conversation + '\0' + identity.id + '\0' + identity.role);
@@ -165,14 +173,14 @@ function pageMetadataRuntime(config, transformFactory) {
       } catch { mark('render', 'unsupported'); return result; }
     };
   }
-  const bridge = Object.freeze({ observe, message, boundary, accept(factory) { if (accepting && typeof factory === 'function') pendingFactory = factory; } });
+  const bridge = Object.freeze({ observe, observeCall, message, boundary, accept(factory) { if (accepting && typeof factory === 'function') pendingFactory = factory; } });
   Object.defineProperty(win, config.key, { value: bridge, configurable: true });
   mark('page', 'ready'); mark('enabled', enabled ? 'on' : 'off');
   function resetAccount(kind) {
     const startup = (kind === 'session' || kind === 'read') && !accountBoundarySeen && !everObserved;
     if (!startup) accountBoundarySeen = true; epoch++; rows.clear(); mark('rows', 0);
     if (!startup) { accountPaused = true; mark('account', 'paused-account'); }
-    else mark('account', 'ready');
+    else mark('account', accountFence ? 'ready' : 'waiting-fence');
     notify();
   }
   function accountKind(input, init) {
@@ -207,14 +215,18 @@ function pageMetadataRuntime(config, transformFactory) {
     const fetch = win.fetch;
     if (typeof fetch === 'function') {
       const observedFetch = new Proxy(fetch, { apply(target, receiver, argumentsList) {
-        try { const kind = accountKind(argumentsList[0], argumentsList[1]); if (kind) resetAccount(kind); } catch {}
+        try {
+          count('fetches');
+          if (!accountFence) { accountFence = true; mark('account-fence', 'observed'); mark('account', accountPaused ? 'paused-account' : 'ready'); notify(); }
+          const kind = accountKind(argumentsList[0], argumentsList[1]); if (kind) resetAccount(kind);
+        } catch {}
         return Reflect.apply(target, receiver, argumentsList);
       } });
       win.fetch = observedFetch; accountFence = win.fetch === observedFetch;
     }
   } catch {}
-  mark('account-fence', accountFence ? 'installed' : 'not-active');
-  if (!accountFence) { accountPaused = true; mark('account', 'paused-account'); }
+  mark('account-fence', accountFence ? 'installed' : 'unconfirmed');
+  mark('account', accountFence ? 'ready' : 'waiting-fence');
   doc.addEventListener(config.eventName, event => {
     if (typeof event.detail !== 'string') return;
     if (event.detail === 'on' || event.detail === 'off') {
@@ -228,7 +240,7 @@ function pageMetadataRuntime(config, transformFactory) {
   function compile(expression) {
     const script = doc.createElement('script');
     script.nonce = doc.currentScript?.nonce || doc.querySelector('script[nonce]')?.nonce || '';
-    script.textContent = 'globalThis[' + JSON.stringify(config.key) + '].accept((' + expression + '));';
+    script.textContent = '"use strict";globalThis[' + JSON.stringify(config.key) + '].accept((' + expression + '));';
     pendingFactory = undefined; accepting = true;
     try { (doc.head || doc.documentElement).appendChild(script); return pendingFactory; }
     finally { accepting = false; pendingFactory = undefined; script.remove(); }
@@ -242,14 +254,17 @@ function pageMetadataRuntime(config, transformFactory) {
       let next = factory;
       try {
         const source = Function.prototype.toString.call(factory);
+        const mappingCandidate = ['context_truncation_continuation', 'getRenderTelemetry', 'isStreaming'].every(token => source.includes(token));
+        if (mappingCandidate) count('mappingCandidates');
         const transformed = transformFactory(source, 'globalThis[' + JSON.stringify(config.key) + ']');
+        if (mappingCandidate && !transformed.changed) mark('mapping-reason', transformed.reason);
         if (transformed.changed) {
-          if (matched.has(transformed.kind) && matched.get(transformed.kind) !== String(moduleId)) { mark('patch', 'ambiguous'); return factory; }
+          if (matched.has(transformed.kind) && matched.get(transformed.kind) !== String(moduleId)) { mark('patch', 'ambiguous'); mark(transformed.kind + '-factory', 'ambiguous'); return factory; }
           // Never force a module that the page already initialized to execute.
-          if (descriptor(descriptor(require, 'c'), moduleId) && String(moduleId) !== String(enteringModuleId)) { mark('patch', 'needs-refresh'); return factory; }
+          if (descriptor(descriptor(require, 'c'), moduleId) && String(moduleId) !== String(enteringModuleId)) { mark('patch', 'needs-refresh'); mark(transformed.kind + '-factory', 'needs-refresh'); return factory; }
           next = compile(transformed.expression);
-          if (typeof next !== 'function') { next = factory; mark('patch', 'page-compile-failed'); }
-          else { matched.set(transformed.kind, String(moduleId)); count('factories'); mark('patch', 'installed'); }
+          if (typeof next !== 'function') { next = factory; mark('patch', 'page-compile-failed'); mark(transformed.kind + '-factory', 'page-compile-failed'); }
+          else { matched.set(transformed.kind, String(moduleId)); count('factories'); mark('patch', 'installed'); mark(transformed.kind + '-factory', 'installed'); if (transformed.kind === 'mapping') mark('mapping-reason', 'installed'); }
         }
       } catch { mark('patch', 'unsupported'); }
       processed.set(factory, next); return next;
@@ -280,3 +295,4 @@ function pageMetadataRuntime(config, transformFactory) {
   timer = setTimeout(() => { if (!runtime) { if (prototype.call === hook) prototype.call = original; mark('runtime', 'not-seen-refresh'); } }, 15000);
 }
 module.exports = { pageMetadataRuntime };
+

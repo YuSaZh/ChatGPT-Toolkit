@@ -9,9 +9,9 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
   const mark = (name, value) => { try { status?.setAttribute('data-' + name, String(value)); } catch {} };
   const checked = () => status?.getAttribute('data-page') === 'ready';
   const inspect = () => {
-    const names = ['page','hook','runtime','registry','patch','react','enabled','mapping','renderer','labels','factories','rows','bootstrap','account','account-fence'];
+    const names = ['page','hook','runtime','registry','patch','react','enabled','mapping','renderer','labels','factories','rows','bootstrap','account','account-fence','fetches','mappingCalls','mappingCandidates','mapping-reason','mapping-factory','message-factory','boundary-factory'];
     const result = {};
-    const labels = new Set(['ready','on','off','installed','not-active','found','not-started','waiting-document','no-page-ack','needs-refresh-or-page-access','not-seen-refresh','failed','unsupported','ambiguous','needs-refresh','page-compile-failed','blocked','paused-account']);
+    const labels = new Set(['ready','on','off','installed','not-active','found','not-started','waiting-document','no-page-ack','needs-refresh-or-page-access','not-seen-refresh','failed','unsupported','ambiguous','needs-refresh','page-compile-failed','blocked','paused-account','waiting-fence','unconfirmed','observed','ambiguous-boundary-export','ambiguous-mapping','ambiguous-message-components','ambiguous-react-namespace','mapping-crosses-function-boundary','unmatched','unsafe-bridge-expression','unsupported-conversation-argument','unsupported-dynamic-scope','unsupported-factory','unsupported-factory-return','unsupported-mapping-assignment','unsupported-mapping-binding','unsupported-mapping-call','unsupported-mapping-selector','unsupported-message-components','unsupported-source','unsupported-syntax']);
     for (const name of names) { const value = status?.getAttribute('data-' + name) || (name === 'bootstrap' ? 'waiting-document' : 'not-started'); result[name] = /^(?:0|[1-9][0-9]{0,8})$/.test(value) || labels.has(value) ? value : 'unsupported'; }
     return result;
   };
@@ -67,3 +67,4 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
   };
 }
 module.exports = { startPageMetadataBridge };
+

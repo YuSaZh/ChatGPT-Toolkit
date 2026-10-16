@@ -6570,12 +6570,10 @@
     if (!call || call.type !== 'CallExpression' || call.optional || call.callee.type !== 'Identifier' || call.arguments.length !== 2 || !info.resolve(call.callee)) return { reason: 'unsupported-mapping-call' };
     const [selector, conversation] = call.arguments;
     if (selector.type !== 'MemberExpression' || selector.computed || selector.optional || selector.object.type !== 'Identifier' || selector.property.type !== 'Identifier' || !info.imported(info.resolve(selector.object))) return { reason: 'unsupported-mapping-selector' };
-    const conversationBinding = info.resolve(conversation);
-    if (conversation.type !== 'Identifier' || !conversationBinding || conversationBinding.kind !== 'param' || conversationBinding.declarations.length !== 1 || conversationBinding.writes.length || conversationBinding.scope.owner !== info.scopes.get(call).owner) return { reason: 'unsupported-conversation-argument' };
-    // Reading the identifier after get() is safe only if get cannot change its
-    // value through a captured assignment or sloppy-mode arguments aliasing.
-    const owner = conversationBinding.scope.owner;
-    if (info.nodes.some(node => node.start >= owner.start && node.end <= owner.end && node.type === 'Identifier' && node.name === 'arguments')) return { reason: 'unsupported-conversation-arguments-alias' };
+    if (conversation.type !== 'Identifier' || !info.resolve(conversation)) return { reason: 'unsupported-conversation-argument' };
+    // observeCall receives the callee and both arguments in their original
+    // left-to-right evaluation order. It uses that captured conversation value,
+    // so outer closures, assignments, and arguments aliases need no extra read.
     if (info.scopes.get(property).owner !== info.scopes.get(call).owner) return { reason: 'mapping-crosses-function-boundary' };
     return { kind: 'mapping', call, conversation, scopes: [info.scopes.get(call)], bindings: { mapping: binding.name, conversation: conversation.name } };
   }
@@ -6627,9 +6625,9 @@
     return { kind: 'boundary', boundary, react: react[0] || null, scopes: [info.bodyScope], bindings: { boundary: boundary.name, react: react[0] ? react[0].name : null } };
   }
 
-  function applyInsertions(source, insertions) {
+  function applyEdits(source, edits) {
     let result = source;
-    for (const insertion of insertions.sort((a, b) => b.position - a.position)) result = result.slice(0, insertion.position) + insertion.text + result.slice(insertion.position);
+    for (const edit of edits.sort((a, b) => b.position - a.position)) result = result.slice(0, edit.position) + edit.text + result.slice(edit.end === undefined ? edit.position : edit.end);
     return result;
   }
 
@@ -6659,17 +6657,19 @@
       if (!bridge) return unchanged('unsafe-bridge-expression');
       let insertions;
       if (plan.kind === 'mapping') {
-        insertions = [
-          { position: plan.call.start - offset, text: bridge + '.observe(' },
-          { position: plan.call.end - offset, text: ',' + plan.conversation.name + ')' },
-        ];
+        const originalArguments = [plan.call.callee, ...plan.call.arguments].map(node => source.slice(node.start - offset, node.end - offset));
+        insertions = [{
+          position: plan.call.start - offset,
+          end: plan.call.end - offset,
+          text: bridge + '.observeCall(' + originalArguments.join(',') + ')',
+        }];
       } else {
         const addition = plan.kind === 'message'
           ? ';' + plan.user.name + '=' + bridge + '.message(' + plan.user.name + ',' + (plan.react ? plan.react.name : 'void 0') + ',false);' + plan.assistant.name + '=' + bridge + '.message(' + plan.assistant.name + ',' + (plan.react ? plan.react.name : 'void 0') + ',true);'
           : ';' + plan.boundary.name + '=' + bridge + '.boundary(' + plan.boundary.name + (plan.react ? ',' + plan.react.name : '') + ');';
         insertions = [{ position: factory.body.end - offset - 1, text: '\n' + addition + '\n' }];
       }
-      const result = applyInsertions(source, insertions);
+      const result = applyEdits(source, insertions);
       const expression = parsed.methodKey === null ? '(' + result + ')' : '({' + result + '})[' + JSON.stringify(parsed.methodKey) + ']';
       return { source: result, expression, changed: true, kind: plan.kind, reason: null, bindings: plan.bindings };
     } catch (_) {

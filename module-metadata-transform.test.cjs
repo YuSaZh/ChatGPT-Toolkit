@@ -43,6 +43,15 @@ function unchanged(source, expression = 'bridge') {
   return result;
 }
 
+// A minimal bridge implementing the runtime contract; the transformer itself
+// does not execute either the original getter or this bridge.
+function observingBridge(observe = value => value) {
+  return { observeCall(get, selector, cid) {
+    const value = Reflect.apply(get, undefined, [selector, cid]);
+    return observe(value, cid);
+  } };
+}
+
 for (const shape of ['arrow', 'method', 'named-method', 'function']) {
   test(`${shape}: observes only original mapping result, once and by identity`, () => {
     const original = factory(CONTENT, shape);
@@ -52,7 +61,7 @@ for (const shape of ['arrow', 'method', 'named-method', 'function']) {
     const mapping = Object.freeze({ node: Object.freeze({}) });
     const selector = Object.freeze({ selector: 1 });
     const order = [];
-    const { exports, requested } = execute(result, { observe(value, cid) { order.push(['observe', value, cid]); return value; } }, { selectors: { mapping: selector } });
+    const { exports, requested } = execute(result, observingBridge((value, cid) => { order.push(['observe', value, cid]); return value; }), { selectors: { mapping: selector } });
     assert.equal(order.length, 0, 'loading the module does not read a selector');
     const got = exports.read((s, cid) => { order.push(['get', s, cid]); return mapping; }, 'cid-one');
     assert.equal(got.mapping, mapping);
@@ -65,7 +74,7 @@ test('original mapping getter failures propagate without observation', () => {
   const result = transform(factory(CONTENT), 'bridge');
   let observed = 0;
   const error = new Error('native failure');
-  const { exports } = execute(result, { observe() { observed++; } }, { selectors: { mapping: {} } });
+  const { exports } = execute(result, observingBridge(() => { observed++; }), { selectors: { mapping: {} } });
   assert.throws(() => exports.read(() => { throw error; }, 'cid'), candidate => candidate === error);
   assert.equal(observed, 0);
 });
@@ -73,7 +82,7 @@ test('original mapping getter failures propagate without observation', () => {
 test('keeps arguments and unrelated evaluations in their original order', () => {
   const source = factory(`var S=r(1);e.read=(get,cid)=>{e.calls.push("before");let a=e.calls.push("a"),value=get(S.mapping,cid),b=e.calls.push("b");return {mapping:value,context_truncation_continuation:0,getRenderTelemetry:0,isStreaming:0}}`);
   let exports;
-  ({ exports } = execute(transform(source, 'bridge'), { observe(value, cid) { exports.calls.push(['observe', cid]); return value; } }, { 1: { mapping: 'selector' } }));
+  ({ exports } = execute(transform(source, 'bridge'), observingBridge((value, cid) => { exports.calls.push(['observe', cid]); return value; }), { 1: { mapping: 'selector' } }));
   const object = {};
   assert.equal(exports.read(() => { exports.calls.push('get'); return object; }, 'cid').mapping, object);
   assert.deepEqual(exports.calls, ['before', 'a', 'get', ['observe', 'cid'], 'b']);
@@ -89,7 +98,7 @@ test('shadowed mapping names in other functions cannot select the wrong assignme
   const result = transform(source, 'bridge');
   assert.equal(result.changed, true);
   assert.ok(result.source.includes('let value=get(S.unrelated,cid)'));
-  assert.equal((result.source.match(/\.observe\(/g) || []).length, 1);
+  assert.equal((result.source.match(/\.observeCall\(/g) || []).length, 1);
 });
 
 test('mapping is not inferred from a property whose value resolves to another scope', () => {
@@ -123,11 +132,112 @@ test('all non-supported mapping assignments fail closed', () => {
   for (const body of variants) unchanged(factory(body));
 });
 
-test('a getter that can mutate the conversation ID must not misattribute the observed mapping', () => {
-  const body = CONTENT.replace('let value=get(S.mapping,cid);', 'const original=get;get=(selector,id)=>{cid="another-conversation";return original(selector,id)};let value=get(S.mapping,cid);');
-  unchanged(factory(body));
-  unchanged(factory(CONTENT.replace('(get,cid)=>{', 'function(get,cid){').replace('let value=get(S.mapping,cid);', 'const original=get;get=(selector,id)=>{arguments[1]="another-conversation";return original(selector,id)};let value=get(S.mapping,cid);')));
-  unchanged(factory(CONTENT.replace('(get,cid)=>{', '(get)=>{let cid=globalThis.cid;')));
+test('a captured outer conversation ID is observed at the original inner getter call', () => {
+  const source = factory(CONTENT.replace('(get,cid)=>{', 'cid=>get=>{'));
+  const result = transform(source, 'bridge');
+  assert.equal(result.kind, 'mapping');
+  assert.ok(result.source.includes('.observeCall(get,S.mapping,cid)'));
+  const mapping = {};
+  const observations = [];
+  const { exports } = execute(result, observingBridge((value, cid) => { observations.push([value, cid]); return value; }), { selectors: { mapping: 'selector' } });
+  const inner = exports.read('outer-conversation');
+  assert.equal(observations.length, 0, 'creating the selector does not read mapping');
+  let reads = 0;
+  const output = inner((selector, cid) => { reads++; assert.equal(selector, 'selector'); assert.equal(cid, 'outer-conversation'); return mapping; });
+  assert.equal(reads, 1);
+  assert.equal(output.mapping, mapping);
+  assert.deepEqual(observations, [[mapping, 'outer-conversation']]);
+});
+
+test('mutable local conversation bindings use the argument value captured before getter execution', () => {
+  const source = factory(CONTENT.replace('(get,cid)=>{', '(get)=>{let cid="before";e.changeCid=next=>{cid=next};'));
+  const mapping = {};
+  const observations = [];
+  const { exports } = execute(transform(source, 'bridge'), observingBridge((value, cid) => { observations.push([value, cid]); return value; }), { selectors: { mapping: 'selector' } });
+  assert.equal(exports.read((selector, cid) => { assert.equal(cid, 'before'); exports.changeCid('after'); return mapping; }).mapping, mapping);
+  assert.deepEqual(observations, [[mapping, 'before']]);
+});
+
+test('getter mutation of cid or a sloppy arguments alias cannot misattribute the observed result', () => {
+  const bodies = [
+    CONTENT.replace('let value=get(S.mapping,cid);', 'const original=get;get=(selector,id)=>{cid="another-conversation";return original(selector,id)};let value=get(S.mapping,cid);'),
+    CONTENT.replace('(get,cid)=>{', 'function(get,cid){').replace('let value=get(S.mapping,cid);', 'const original=get;get=(selector,id)=>{arguments[1]="another-conversation";return original(selector,id)};let value=get(S.mapping,cid);'),
+  ];
+  for (const body of bodies) {
+    const observations = [];
+    const mapping = {};
+    let reads = 0;
+    const { exports } = execute(transform(factory(body), 'bridge'), observingBridge((value, cid) => { observations.push([value, cid]); return value; }), { selectors: { mapping: 'selector' } });
+    const result = exports.read((selector, cid) => { reads++; assert.equal(cid, 'original-conversation'); return mapping; }, 'original-conversation');
+    assert.equal(result.mapping, mapping);
+    assert.equal(reads, 1);
+    assert.deepEqual(observations, [[mapping, 'original-conversation']]);
+  }
+});
+
+test('selector access can change get and cid while preserving callee-before-arguments evaluation', () => {
+  const source = factory(CONTENT.replace('let value=get(S.mapping,cid);', 'e.change=(nextGet,nextCid)=>{get=nextGet;cid=nextCid};let value=get(S.mapping,cid);'));
+  const mapping = {};
+  const order = [];
+  let exports;
+  const selectors = { get mapping() {
+    order.push('selector');
+    exports.change(() => { throw new Error('replacement getter must not run'); }, 'after-selector');
+    return 'selector-value';
+  } };
+  ({ exports } = execute(transform(source, 'bridge'), observingBridge((value, cid) => { order.push(['observe', cid]); return value; }), { selectors }));
+  const result = exports.read((selector, cid) => { order.push(['original-get', selector, cid]); return mapping; }, 'before-selector');
+  assert.equal(result.mapping, mapping);
+  assert.deepEqual(order, ['selector', ['original-get', 'selector-value', 'after-selector'], ['observe', 'after-selector']]);
+});
+
+test('selector getter errors propagate identically without calling get or observing', () => {
+  const error = new Error('selector-access-failure');
+  let gets = 0;
+  let observations = 0;
+  const selectors = { get mapping() { throw error; } };
+  const { exports } = execute(transform(factory(CONTENT), 'bridge'), observingBridge(() => { observations++; }), { selectors });
+  assert.throws(() => exports.read(() => { gets++; }, 'cid'), value => value === error);
+  assert.equal(gets, 0);
+  assert.equal(observations, 0);
+});
+
+test('Proxy apply traps see one unbound call, original arguments, and unchanged results or throws', () => {
+  for (const throwing of [false, true]) {
+    const mapping = {};
+    const error = new Error('proxy-apply-failure');
+    const calls = [];
+    const observations = [];
+    const get = new Proxy(function () {}, { apply(target, receiver, args) {
+      calls.push([receiver, [...args]]);
+      if (throwing) throw error;
+      return mapping;
+    }, get(target, key) { if (key === 'apply' || key === 'call') throw new Error('must not read a function helper'); return Reflect.get(target, key); } });
+    const { exports } = execute(transform(factory(CONTENT), 'bridge'), observingBridge((value, cid) => { observations.push([value, cid]); return value; }), { selectors: { mapping: 'selector' } });
+    if (throwing) assert.throws(() => exports.read(get, 'cid'), value => value === error);
+    else assert.equal(exports.read(get, 'cid').mapping, mapping);
+    assert.deepEqual(calls, [[undefined, ['selector', 'cid']]]);
+    assert.deepEqual(observations, throwing ? [] : [[mapping, 'cid']]);
+  }
+});
+
+for (const strict of [false, true]) {
+  test(`observeCall preserves ${strict ? 'strict' : 'sloppy'} getter this semantics in its own realm`, () => {
+    const transformed = transform(factory(CONTENT), 'bridge');
+    const { exports, context } = execute(transformed, observingBridge(), { selectors: { mapping: 'selector' } });
+    const get = vm.runInContext(`(function(selector,cid){${strict ? '"use strict";' : ''}return {receiver:this,selector,cid}})`, context);
+    const result = exports.read(get, 'cid').mapping;
+    assert.equal(result.receiver, strict ? undefined : vm.runInContext('globalThis', context));
+    assert.equal(result.selector, 'selector');
+    assert.equal(result.cid, 'cid');
+  });
+}
+
+test('parenthesized callee and arguments retain identifier-call semantics', () => {
+  const source = factory(CONTENT.replace('get(S.mapping,cid)', '((get)) ( /* selector */ (S.mapping), /* conversation */ (cid))'));
+  const mapping = {};
+  const { exports } = execute(transform(source, 'bridge'), observingBridge(), { selectors: { mapping: 'selector' } });
+  assert.equal(exports.read((selector, cid) => { assert.equal(selector, 'selector'); assert.equal(cid, 'cid'); return mapping; }, 'cid').mapping, mapping);
 });
 
 test('string/comment/regex/template content cannot supply missing fingerprints', () => {
@@ -375,3 +485,4 @@ test('standalone browser expression has no require/global-parser dependency', ()
     assert.equal(browser.kind, native.kind);
   }
 });
+

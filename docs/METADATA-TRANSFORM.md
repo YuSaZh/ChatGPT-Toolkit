@@ -14,7 +14,7 @@ application module at transformation time.
   package imports, network requests, `eval`, or `Function` constructor.
 - Call `transformMessageFactory(factorySource, bridgeExpression)`.
 - On success the result is `{source, expression, changed: true, kind, reason: null,
-  bindings}`. `source` preserves the original source outside narrow insertions.
+  bindings}`. `source` preserves the original source outside narrowly bounded AST source-range edits.
   `expression` is a compilable expression even when `Function#toString` supplied
   an object method such as `123(module, exports, require){...}`.
 - On any unsupported/ambiguous input it returns the original `source` exactly,
@@ -22,7 +22,8 @@ application module at transformation time.
   contains application source or user values.
 - The bridge expression must be a statically named, unshadowed global path, such
   as `globalThis["your-private-bridge-key"]`. Runtime bridge methods must be
-  non-throwing and obey the contracts below. Compilation and bridge installation
+  transparent and obey the contracts below: observation must not throw, while
+  observeCall must preserve exceptions from the original getter. Compilation and bridge installation
   are deliberately outside this module.
 
 ## Narrow supported changes
@@ -31,12 +32,18 @@ application module at transformation time.
    `context_truncation_continuation`, `getRenderTelemetry`, and `isStreaming`, and
    exactly one `mapping: value` property can change its unique local assignment
    from `value = get(imported.selector, conversation)` to
-   `value = bridge.observe(get(imported.selector, conversation), conversation)`.
+   `value = bridge.observeCall(get, imported.selector, conversation)`.
    The imported namespace is tied to an existing factory-local literal require
-   declaration. The original getter call stays in place and runs once. The
-   conversation identifier must be an unmodified parameter of the same selector
-   function, with no `arguments` aliasing. `observe` must return its first input
-   unchanged and must not request or retain message body data.
+   declaration. The getter and both arguments are evaluated once, in their
+   original left-to-right order, at the original call site. The conversation
+   identifier must resolve to a lexical binding; outer captures, mutable locals,
+   and arguments aliases are supported. No second conversation-ID read occurs.
+   The bridge must invoke `Reflect.apply(get, undefined, [selector, conversation])`
+   exactly once, preserve its returned value or thrown exception, then observe
+   the returned mapping with the already-captured conversation argument. This
+   retains an identifier call's strict/sloppy `this` and Proxy apply behavior.
+   Observation must not request or retain message body data. The transformer
+   does not independently invoke the getter or any module.
 2. **Message:** The three real message-operation markers
    `copyPlainTextFromSource`, `suppressCopyTurnToClipboardAnalytics`, and
    `getCopyHtml`, plus two unique JSX component bindings, authorize two end-of-factory reassignments through
@@ -80,7 +87,9 @@ and rejects other parser bytes. The browser build itself only needs the
 checked-in parser and Node.js.
 
 Synthetic tests validate all factory source forms, one original mapping read,
-identity and exception preservation, conversation-ID mutation rejection,
+identity and exception preservation, captured/mutable conversation IDs, selector
+access ordering, strict/sloppy receivers, Proxy apply behavior,
 lexical shadows, duplicate rejection, inert wrapper registration, live export
 getters, exact source preservation, and browser-bundle parity. They do not prove
 that an authenticated live ChatGPT frontend still has these factory shapes.
+

@@ -1,5 +1,15 @@
 # ChatGPT Toolkit 验证记录
 
+## 1.1.18 数据入口与页面语义验证
+
+- 用户 1.1.17 诊断显示页面 ack / webpack / 工厂注入已运行，两个目标模块、9 次原生挂载，但没有 mapping；账号观察显示 ready / not-active。由此不再把整段 bootstrap 失败作为本次解释。具体数据模块源码尚不可见，两个模块可能来自 AST 拒绝或早已缓存，新增分项状态用于区分。
+- 独立复现旧 AST 拒绝参考可识别的外层闭包 ID 和本地 ID；现在在原调用点通过 observeCall 透明转发同一次调用，callee → selector → ID 各求值一次。覆盖属性 getter 修改 ID / callee、getter 自身修改 ID、严格 / 非严格 this、Proxy apply、原异常与返回身份。真实 webpack → AST → 内联编译 → React 模块验证也改用旧实现拒绝的闭包形状。
+- 独立序列化页面 realm 复现旧 runtime 将原严格组件的 undefined this 改为 window；函数体内严格模式与编译脚本严格模式现已修正。测试通过实际 toString / 页面脚本执行，不只测试 CJS require。
+- 模拟 fetch 每次读回不同代理但 setter 实际生效的场景：安装时保持 waiting-fence；只有页面自行调用到达后才开放标签，原 fetch 一次、原 Promise / this / 参数 / 错误不变。真正 hard account pause 不会由此解除；不可写且未到达时仍隐藏，不发探测请求。该场景证明兼容逻辑，不代表已识别用户环境具体包装方式。
+- 新悬停回归覆盖明确语音入口、同表单唯一 peer 的无 editor 模型入口、Pro-only / all、跨 form 不混用模型、隐藏 / 排除区域、固定诊断与状态无副作用，零点击 / 请求 / 麦克风调用。
+- 独立完整执行：根目录 `node --test *.test.cjs` 共 536 项；`validation/react-runtime` 两套真实 React 验证，以及 bootstrap / account / serialized 共 26 项全部通过。可复现构建、Acorn 校验及语法检查通过。
+- 未登录或操作真实 ChatGPT / WebDAV；公开未登录构建仍与用户 webpack 构建不同。没有把公开构建或 jsdom 当成用户页验收，没有重试先前受限的浏览器沙箱路径。真实标签、Tampermonkey、布局和语音悬停仍以用户更新刷新后结果为准。
+
 ## 1.1.17 模块注入验证
 
 - 根目录 Node 回归：515 项全部通过；另有真实 React运行时与独立page bootstrap/fetch回归。构建、语法、依赖许可检查均独立运行。
