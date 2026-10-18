@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.21
+// @version      1.1.22
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -32,7 +32,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: "1.1.21", phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: "1.1.22", phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null, inspectStorage: null, inspectMessageInfo: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -352,17 +352,16 @@
     let epoch = 0, value = null;
     const notify = () => { try { changed(); } catch { /* optional UI must never disrupt native fetch */ } };
     return {
-      invalidate() { epoch++; const hadValue = value !== null; value = null; if (hadValue) notify(); return epoch; },
+      invalidate(clear = true) { epoch++; if (clear) { const hadValue = value !== null; value = null; if (hadValue) notify(); } return epoch; },
       accept(token, data) {
         if (token !== epoch) return false;
         const parsed = parseImageQuota(data);
-        value = parsed ? { ...parsed, observedAt: clock() } : null;
-        notify(); return value !== null;
+        if (!parsed) return false;
+        value = { ...parsed, observedAt: clock() };
+        notify(); return true;
       },
       current() {
         if (!value) return null;
-        const now = clock();
-        if (now < value.observedAt || now - value.observedAt >= IMAGE_QUOTA_TTL) { value = null; epoch++; return null; }
         return { ...value };
       }
     };
@@ -388,12 +387,13 @@
     let epoch = 0, value = null;
     const notify = () => { try { changed(); } catch { /* UI only */ } };
     return {
-      invalidate() { epoch++; const previous = value; value = null; if (previous) notify(); return epoch; },
+      invalidate(clear = true) { epoch++; if (clear) { const previous = value; value = null; if (previous) notify(); } return epoch; },
       accept(token, data) {
         if (token !== epoch) return false;
         const parsed = parsePow(data);
-        value = parsed ? { ...parsed, observedAt: clock() } : null;
-        notify(); return !!value;
+        if (!parsed) return false;
+        value = { ...parsed, observedAt: clock() };
+        notify(); return true;
       },
       current() { return value ? { ...value } : null; }
     };
@@ -1025,8 +1025,8 @@
       } catch { /* optional metadata display */ }
       // Reserve generations before native fetch can synchronously trigger an
       // account/navigation fence. Old challenges must not acquire a new epoch.
-      try { if (quotaKind) quotaToken = imageQuota.invalidate(); } catch { /* optional display */ }
-      try { if (powKind) powToken = pow.invalidate(); } catch { /* optional display */ }
+      try { if (quotaKind) quotaToken = imageQuota.invalidate(!!accountRequest(args[0], args[1], quotaBase, true)); } catch { /* optional display */ }
+      try { if (powKind) powToken = pow.invalidate(powKind === 'invalidate'); } catch { /* optional display */ }
       let result, nativeError, nativeThrew = false;
       try { result = Reflect.apply(original, this, args); }
       catch (error) { nativeError = error; nativeThrew = true; }
@@ -1741,16 +1741,11 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     if (diagnostics) diagnostics.inspectMessageInfo = () => refreshMessageInfo();
     // Transient UI state; never persisted or included in backups/sync.
     const knownCountKeys = new Set(), queuedIncrements = new Map();
-    let quotaExpiryTimer;
     const imageQuota = createImageQuotaState({ changed: () => {
-      clearTimeout(quotaExpiryTimer);
-      const current = imageQuota.current();
-      if (current) quotaExpiryTimer = setTimeout(() => imageQuota.invalidate(), IMAGE_QUOTA_TTL);
       if (uiReady) updateHover();
     } });
     const pow = createPowState({ changed: () => { if (uiReady) scheduleRender(); } });
     const account = createAccountState({ changed: () => {
-      imageQuota.invalidate(); pow.invalidate();
       if (uiReady) { applyAccountLedger(); clearIncrement(); queuedIncrements.clear(); scheduleRender(); refreshAccountPreference(); }
     } });
     function applyAccountLedger() {
@@ -1761,7 +1756,9 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     const contextSnapshot = () => `${settings.id}:${account.enabled()}:${account.current().epoch}:${settings.ledger}`;
     const invalidateAccount = () => { if (account.enabled()) account.invalidate(); };
     let quotaPage = win.location.href;
-    const invalidateImageQuota = () => { imageQuota.invalidate(); pow.invalidate(); invalidateAccount(); quotaPage = win.location.href; };
+    // Keep the last captured scalars during ordinary page interaction. Auth
+    // requests still clear both values synchronously in the observer above.
+    const invalidateImageQuota = () => { imageQuota.invalidate(false); pow.invalidate(false); invalidateAccount(); quotaPage = win.location.href; };
 
     const countKey = event => JSON.stringify([event.ledger, event.key]);
     const isProCount = event => event.state === 'accepted' && kindFor(event) === 'pro';
@@ -1907,7 +1904,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       :host([hidden]){display:none!important}
       :host([data-dark]){--bg:#202329;--fg:#f0f2f5;--muted:#aab2bf;--line:#3a4049;--soft:#2a2e35;--accent:#bca7ff;--accent-bg:#34294d;--warn:#f4c078;--shadow:0 12px 45px #0007}
       *{box-sizing:border-box}.panel,.launcher,.hover-card{font:12px/1.5 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--fg)}button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);background:var(--bg);color:var(--fg);font-size:12px;line-height:1.4;min-height:28px;padding:5px 8px;border-radius:8px}button:hover{background:var(--soft)}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #ac8df9;outline-offset:2px}button.primary{background:var(--accent-bg);color:var(--accent);border-color:transparent;font-weight:650}button.ghost{border:none;background:transparent;padding:4px 7px;color:var(--muted)}
-      .panel{width:min(310px,calc(100vw - 24px));max-height:calc(100dvh - 94px);overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 7px}h1{font-size:13px;margin:0;font-weight:700;letter-spacing:.1px;display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;min-width:0}h1 span{font-size:10px;color:var(--accent);background:var(--accent-bg);padding:3px 6px;margin-left:0;border-radius:5px;vertical-align:middle}.body{padding:6px 14px 14px}.muted,small{color:var(--muted)}small{font-size:11px}.eyebrow{color:var(--muted);font-size:12px}.number{font-size:34px;letter-spacing:-1px;font-weight:700;line-height:1.25;margin-top:5px}.number span{font-size:15px;letter-spacing:0;color:var(--muted);font-weight:400}.meter{height:5px;border-radius:9px;background:var(--soft);overflow:hidden;margin:9px 0}.fill{height:100%;background:linear-gradient(90deg,#3e4ee9,#9766f7,#c995ff);border-radius:9px}.row{display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap}.meta{font-size:11px;color:var(--muted)}.callout{font-size:11px;color:var(--muted);background:var(--soft);padding:8px 9px;border-radius:8px;margin:9px 0}.warning{color:var(--warn)}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.calibration{display:grid;grid-template-columns:56px 56px minmax(0,1fr);gap:6px}.calibration button{font-size:11px;min-width:0;padding:5px 4px;white-space:nowrap}.calibration .initial{background:var(--soft);color:var(--muted);font-weight:500}.secondary{gap:4px;margin-top:6px}.secondary button{font-size:11px;min-height:26px;padding:4px 6px;color:var(--muted);border-color:transparent;background:transparent}.secondary button:hover{background:var(--soft)}.foot{border-top:1px solid var(--line);padding-top:9px;margin-top:9px;font-size:10px;color:var(--muted)}.chip{padding:6px 10px;border-radius:30px;box-shadow:0 3px 20px #31245c18;font-size:12px;display:flex;align-items:center;gap:4px}.chip strong{color:var(--accent);margin:0 5px}nav{display:flex;gap:4px;padding:0 14px 4px}nav button{font-size:11px;border:none;padding:4px 7px}nav button.active{background:var(--accent-bg);color:var(--accent)}label{display:block;font-size:11px;margin:10px 0 4px}input,select{width:100%;min-width:0;padding:6px 7px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--fg)}.log{list-style:none;margin:0;padding:0}.log li{padding:10px 0;border-bottom:1px solid var(--line)}.log .model{font-size:11px;word-break:break-all;margin-top:3px}.badge{font-size:10px}.empty{padding:25px 0;text-align:center;color:var(--muted)}p{margin:7px 0}.notice{margin:0 14px 7px;padding:8px;background:var(--accent-bg);color:var(--accent);font-size:11px;border-radius:8px} .error{background:var(--soft);color:var(--warn)}
+      .panel{width:min(310px,calc(100vw - 24px));max-height:min(540px,68dvh,calc(100dvh - 94px));display:flex;flex-direction:column;overflow:hidden;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 7px}h1{font-size:13px;margin:0;font-weight:700;letter-spacing:.1px;display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;min-width:0}h1 span{font-size:10px;color:var(--accent);background:var(--accent-bg);padding:3px 6px;margin-left:0;border-radius:5px;vertical-align:middle}.body{padding:6px 14px 14px;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}.panel>header,.panel>nav,#gpc-notices{flex-shrink:0}.panel-log .body{display:flex;flex-direction:column;overflow:hidden}.panel-log .body>*{flex-shrink:0}.panel-log .body>.log{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;padding-inline-end:5px}.panel-log .foot{padding-top:6px;margin-top:6px}.panel-log .log{margin-top:6px}.muted,small{color:var(--muted)}small{font-size:11px}.eyebrow{color:var(--muted);font-size:12px}.number{font-size:34px;letter-spacing:-1px;font-weight:700;line-height:1.25;margin-top:5px}.number span{font-size:15px;letter-spacing:0;color:var(--muted);font-weight:400}.meter{height:5px;border-radius:9px;background:var(--soft);overflow:hidden;margin:9px 0}.fill{height:100%;background:linear-gradient(90deg,#3e4ee9,#9766f7,#c995ff);border-radius:9px}.row{display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap}.meta{font-size:11px;color:var(--muted)}.callout{font-size:11px;color:var(--muted);background:var(--soft);padding:8px 9px;border-radius:8px;margin:9px 0}.warning{color:var(--warn)}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.calibration{display:grid;grid-template-columns:56px 56px minmax(0,1fr);gap:6px}.calibration button{font-size:11px;min-width:0;padding:5px 4px;white-space:nowrap}.calibration .initial{background:var(--soft);color:var(--muted);font-weight:500}.secondary{gap:4px;margin-top:6px}.secondary button{font-size:11px;min-height:26px;padding:4px 6px;color:var(--muted);border-color:transparent;background:transparent}.secondary button:hover{background:var(--soft)}.foot{border-top:1px solid var(--line);padding-top:9px;margin-top:9px;font-size:10px;color:var(--muted)}.chip{padding:6px 10px;border-radius:30px;box-shadow:0 3px 20px #31245c18;font-size:12px;display:flex;align-items:center;gap:4px}.chip strong{color:var(--accent);margin:0 5px}nav{display:flex;gap:4px;padding:0 14px 4px}nav button{font-size:11px;border:none;padding:4px 7px}nav button.active{background:var(--accent-bg);color:var(--accent)}label{display:block;font-size:11px;margin:10px 0 4px}input,select{width:100%;min-width:0;padding:6px 7px;border:1px solid var(--line);border-radius:8px;background:var(--soft);color:var(--fg)}.log{list-style:none;margin:0;padding:0}.log li{padding:7px 0;border-bottom:1px solid var(--line)}.log .model{font-size:11px;word-break:break-all;margin-top:3px}.badge{font-size:10px}.empty{padding:25px 0;text-align:center;color:var(--muted)}p{margin:7px 0}.notice{margin:0 14px 7px;padding:8px;background:var(--accent-bg);color:var(--accent);font-size:11px;border-radius:8px} .error{background:var(--soft);color:var(--warn)}
       .pow-difficulty{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.display-setting{padding-bottom:10px;margin-bottom:8px;border-bottom:1px solid var(--line)}.display-setting>label{margin-top:0}.segmented{display:flex;gap:3px;background:var(--soft);padding:3px;border:1px solid var(--line);border-radius:9px}.segmented button{flex:1;font-size:11px;border-color:transparent;background:transparent;color:var(--muted)}.segmented button[aria-pressed="true"]{background:var(--bg);color:var(--accent);border-color:var(--line);box-shadow:0 1px 3px #00000008}.display-setting small{display:block;font-size:10px;margin-top:5px}
       .count-increment{display:grid;place-items:center;min-width:44px;height:32px;border:1px solid var(--line);border-radius:18px;background:var(--accent-bg);color:var(--accent);font-size:19px;font-weight:750;box-shadow:var(--shadow);animation:count-rise 1.1s ease-out both;pointer-events:none}@keyframes count-rise{0%{opacity:0;transform:translateY(8px) scale(.88)}20%,65%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-16px) scale(1)}}
       .launcher{display:flex;justify-content:flex-end;margin-top:10px}.chip:before{content:'✦';color:var(--accent);font-size:15px;margin-right:3px}.chip small{font-size:10px}.hover-card{width:min(248px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;overflow-wrap:anywhere;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 42px #35245c24;color:var(--fg)}.hover-title{gap:4px 8px;font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center}.pro-label{font-weight:650;letter-spacing:.2px;color:var(--accent)}.hover-card .number{font-size:28px;line-height:1.2;margin:6px 0 0}.hover-card .number span{font-size:14px}.image-quota{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5;font-variant-numeric:tabular-nums}.hover-card .meter{margin:8px 0;height:5px}.hover-title>span,.hover-footer>span{min-width:0}.hover-footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 8px;font-size:11px;color:var(--muted)}.hover-footer button{flex-shrink:0;font-size:11px;color:var(--accent);border:none;background:transparent;padding:3px 0}.hover-error{font-size:11px;color:var(--warn);margin-top:8px}.panel{animation:appear .16s ease-out}.close{font-size:18px;line-height:1}.chip strong{font-variant-numeric:tabular-nums}.number{font-variant-numeric:tabular-nums}.fill{transition:width .22s ease}@keyframes appear{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@media(max-width:460px){.hover-card{width:min(248px,calc(100vw - 24px))}.panel{border-radius:14px}}@media(max-width:300px){.calibration{grid-template-columns:1fr 1fr}.calibration .initial{grid-column:1/-1;white-space:normal}.hover-title{flex-wrap:wrap}}
@@ -1917,6 +1914,8 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     function render(resetForm = false) {
       if (!root) return;
       const focusedAction = root.activeElement?.getAttribute('data-action');
+      const previousTab = root.querySelector('#gpc-panel')?.getAttribute('data-tab');
+      const bodyScroll = root.querySelector('.body')?.scrollTop || 0, logScroll = root.querySelector('.log')?.scrollTop || 0;
       const total = summarize(records, settings);
       updateHover();
       // Keep the live form, focus, selection, native undo and composition state
@@ -1950,13 +1949,14 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
         body = `<div id="storage-report" class="callout">${lines.map(line => `<div>${esc(line)}</div>`).join('')}</div><div class="actions">${button('storage', '重新检查')}${button('export', '导出本机记录')}${button('home', '返回概览')}</div><ul class="log">${report.backups.map((entry, index) => `<li>备份 ${index + 1} · ${entry.valid ? `${entry.count} 条` : '保留原值'}${entry.valid ? `<button type="button" data-action="backup-export" data-backup-index="${index}">导出此备份</button>` : ''}</li>`).join('')}</ul><div class="foot">此处导出只生成本机文件。不要公开分享记录备份；排障可只提供上方计数摘要。</div>`;
       } else if (tab === 'log') {
         const proof = pow.current();
-        const powStatus = `<div id="pow-status" class="callout" role="status">PoW 难度：${proof ? `<span class="pow-difficulty">${esc(proof.difficulty)}</span><br>是否要求：${proof.required === null ? '未知' : proof.required ? '是' : '否'} · 最近捕获 ${fmt(proof.observedAt)}` : '暂未捕获'}</div>`;
+        const powStatus = `<div id="pow-status" class="callout" role="status">PoW 难度：${proof ? `<span class="pow-difficulty" title="是否要求：${proof.required === null ? '未知' : proof.required ? '是' : '否'}">${esc(proof.difficulty)}</span> · 最近捕获 ${fmt(proof.observedAt)}` : '暂未捕获'}</div>`;
         const rows = (accountPending() ? [...new Set(records.filter(event => event.ledger.startsWith('unassigned:')).map(event => event.ledger))].flatMap(ledger => grouped(records, ledger)).sort((a, b) => b.at - a.at) : grouped(records, settings.ledger)).slice(0, 80);
-        body = `${powStatus}<div class="actions">${button('storage', '所有账本与备份')}</div><div class="row"><span class="eyebrow">${esc(settings.label)} · 最近 ${rows.length} 条</span>${button('export', '导出', 'ghost')}</div><ul class="log">${rows.length ? rows.map(e => `<li><div class="row"><strong class="badge ${e.state === 'failed' || e.state === 'aborted' ? 'warning' : ''}">${esc(status(e))}</strong><small>${fmt(e.at)}</small></div>${e.state === 'manual' ? '' : `<div class="model muted">请求：${esc(e.requested || '未知')}<br>响应路由：${esc(e.conflict ? '字段冲突' : e.route || '未取得')}${e.label ? `<br>回答标签：${esc(e.label)}` : ''}</div><small>${e.observation === 'handoff' ? '响应已转交其他通道；未监听 WebSocket' : e.observation === 'bounded' ? '达到观察上限；后续状态未知' : e.observation === 'unreadable' ? '未解析到响应元数据' : e.observation === 'http' ? '仅确认 HTTP 接收' : ''}${!e.stable ? ' · 缺少稳定 ID，重试可能重复' : ''}${e.attempts > 1 ? ` · ${e.attempts} 次尝试已合并` : ''}</small>`}</li>`).join('') : '<li class="empty">还没有记录<br><small>打开历史对话不会增加计数</small></li>'}</ul><div class="foot">已接收 ≠ 官方扣额。HTTP 失败/取消不计入，但也不能证明平台未扣额；可手动校准。</div>`;
+        body = `${powStatus}<div class="actions">${button('storage', '所有账本与备份')}</div><div class="row"><span class="eyebrow">${esc(settings.label)} · 最近 ${rows.length} 条</span>${button('export', '导出', 'ghost')}</div><ul class="log" tabindex="0" aria-label="计数记录">${rows.length ? rows.map(e => `<li><div class="row"><strong class="badge ${e.state === 'failed' || e.state === 'aborted' ? 'warning' : ''}">${esc(status(e))}</strong><small>${fmt(e.at)}</small></div>${e.state === 'manual' ? '' : `<div class="model muted">请求：${esc(e.requested || '未知')}<br>响应路由：${esc(e.conflict ? '字段冲突' : e.route || '未取得')}${e.label ? `<br>回答标签：${esc(e.label)}` : ''}</div><small>${e.observation === 'handoff' ? '响应已转交其他通道；未监听 WebSocket' : e.observation === 'bounded' ? '达到观察上限；后续状态未知' : e.observation === 'unreadable' ? '未解析到响应元数据' : e.observation === 'http' ? '仅确认 HTTP 接收' : ''}${!e.stable ? ' · 缺少稳定 ID，重试可能重复' : ''}${e.attempts > 1 ? ` · ${e.attempts} 次尝试已合并` : ''}</small>`}</li>`).join('') : '<li class="empty">还没有记录<br><small>打开历史对话不会增加计数</small></li>'}</ul><div class="foot">已接收 ≠ 官方扣额。HTTP 失败/取消不计入，但也不能证明平台未扣额；可手动校准。</div>`;
       } else {
         body = `<div class="eyebrow">${settings.mode === 'fixed' ? '本周期' : '最近七天'}已用 · 本机估算</div><div class="number">${!storageAvailable ? '待核对' : accountPending() ? '待识别' : total.used}<span> / ${settings.cap}</span></div><div class="meter" role="progressbar" aria-label="本机估算已用" aria-valuemin="0" aria-valuemax="${Math.max(total.used, settings.cap)}" aria-valuenow="${accountPending() ? 0 : total.used}"><div class="fill" style="width:${accountPending() ? 0 : Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="row"><strong>估算剩余 ${!storageAvailable ? '待核对' : accountPending() ? '待识别' : total.remaining}</strong><span class="meta">待确认 ${total.pending} · 失败/取消 ${total.failed}</span></div><div class="callout">${settings.mode === 'fixed' ? `下个周期：${fmt(total.next)}<br>锚点由你设置，不是服务端重置时间。` : '每条记录在 168 小时后移出统计窗口。'}${total.raw < 0 ? '<br><span class="warning">校准合计为负，已用暂显示 0，请复核记录。</span>' : ''}</div><div class="meta">已接收 Pro ${!storageAvailable ? '待核对' : accountPending() ? '待识别' : total.pro} · 手动校准 ${total.adjustment >= 0 ? '+' : ''}${total.adjustment}</div><div class="actions calibration" role="group" aria-label="手动校准">${button('plus', '+1 校正')}${button('minus', '−1 校正')}${button('settings', '初始用量 / 设置', 'initial')}</div><div class="actions secondary">${button('export', '导出')}${button('import', '导入合并')}${button('backup', '最近备份', 'ghost')}${button('storage', '本机数据检查', 'ghost')}</div><div class="foot">本机优先 · ${getDav().enabled ? 'WebDAV 已配置' : 'WebDAV 未启用'} · 非官方余额<br>${esc(settings.label)} · ${observer?.healthy() ? (observer.observed() ? '观察器已捕获请求' : '观察器已安装，等待新请求') : '观察器可能被覆盖，请刷新页面'}${account.enabled() ? '<br>按登录用户分账；上限与周期设置共用。' : ''}${getDav().enabled ? `<br>${esc(syncStatus)}${Math.max(settings.updated, ...records.map(e => e.updated)) > Number(gmGet(`${PREFIX}lastSync`, 0)) ? '<br>有待同步的新记录；断网时保留在本机。' : ''}` : ''}</div>`;
       }
-      renderMarkup(root, `<style>${style}</style><section id="gpc-panel" class="panel" role="dialog" aria-label="ChatGPT Toolkit"><header><h1>ChatGPT Toolkit<span>LOCAL</span></h1><button type="button" data-action="collapse" class="ghost close" aria-label="关闭计数器">×</button></header><nav>${button('home', '概览', tab === 'home' ? 'active' : '')}${button('log', '记录', tab === 'log' ? 'active' : '')}${button('settings', '设置', tab === 'settings' ? 'active' : '')}${button('sync', '同步', tab === 'sync' ? 'active' : '')}</nav><div id="gpc-notices">${panelNotices()}</div><div class="body">${body}</div><input type="file" id="import" accept="application/json,.json" hidden></section>${launcher(total)}`);
+      renderMarkup(root, `<style>${style}</style><section id="gpc-panel" class="panel${tab === 'log' ? ' panel-log' : ''}" data-tab="${tab}" role="dialog" aria-label="ChatGPT Toolkit"><header><h1>ChatGPT Toolkit<span>LOCAL</span></h1><button type="button" data-action="collapse" class="ghost close" aria-label="关闭计数器">×</button></header><nav>${button('home', '概览', tab === 'home' ? 'active' : '')}${button('log', '记录', tab === 'log' ? 'active' : '')}${button('settings', '设置', tab === 'settings' ? 'active' : '')}${button('sync', '同步', tab === 'sync' ? 'active' : '')}</nav><div id="gpc-notices">${panelNotices()}</div><div class="body">${body}</div><input type="file" id="import" accept="application/json,.json" hidden></section>${launcher(total)}`);
+      if (previousTab === tab) { const body = root.querySelector('.body'), list = root.querySelector('.log'); if (body) body.scrollTop = bodyScroll; if (list) list.scrollTop = logScroll; }
       if (focusedAction) root.querySelector(`[data-action="${focusedAction}"]`)?.focus();
     }
     function manual(delta, at = Date.now()) {
@@ -2323,7 +2323,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       if (!hoverRoot || !activeTrigger || !nativeTrigger(activeTrigger)) { setHoverVisible(false); if (diagnostics) diagnostics.state.hoverCard = 'hidden'; return; }
       if (quotaPage !== win.location.href || document.hidden) invalidateImageQuota();
       const quota = imageQuota.current();
-      const imageLine = quota ? `图片剩余 ${quota.remaining} 次 · ${esc(new Date(quota.observedAt).toLocaleTimeString())} 读取` : '图片剩余：暂未获取';
+      const imageLine = quota ? `图片剩余 ${quota.remaining} 次 · 最近捕获 ${esc(fmt(quota.observedAt))}` : '图片剩余：暂未获取';
       const hadFocus = !!hoverRoot.activeElement;
       const total = summarize(records, settings);
       renderMarkup(hoverRoot, `<style>${style}</style><section class="hover-card" aria-label="Pro 用量，本机估算"><div class="hover-title"><span class="pro-label">✦ Pro</span><span>${settings.mode === 'fixed' ? '本周期' : '最近七天'} · 本机估算</span></div><div class="number">${!storageAvailable ? '待核对' : accountPending() ? '待识别' : total.remaining}<span> 次剩余</span></div><div class="image-quota" title="仅显示本页刚观察到的图片额度；最多保留 60 秒，不主动查询">${imageLine}</div><div class="meter" aria-hidden="true"><div class="fill" style="width:${accountPending() ? 0 : Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="hover-footer"><span>已用 ${!storageAvailable ? '待核对' : accountPending() ? '待识别' : total.used} / ${settings.cap}</span><button type="button" data-action="manage">管理用量 ↗</button></div>${storageError ? '<div class="hover-error">存储异常，请打开计数器检查</div>' : ''}</section>`);

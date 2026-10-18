@@ -153,23 +153,23 @@ test('v115 quota: exact same-origin init POST only; account/session reads invali
   assert.equal(api.imageQuotaRequest('https://evil.invalid/backend-api/conversation/init', { method: 'POST' }, base), '');
 });
 
-test('v115 quota: TTL, account epoch, and independent-tab state prevent stale reuse', () => {
+test('v115 quota: v122 last capture survives time while account epoch and tabs stay isolated', () => {
   let now = 100000;
   const a = api.createImageQuotaState({ clock: () => now }), b = api.createImageQuotaState({ clock: () => now });
   const token = a.invalidate(); assert.equal(a.accept(token, quotaData(17)), true);
   assert.equal(a.current().remaining, 17); assert.equal(b.current(), null);
   now += api.IMAGE_QUOTA_TTL - 1; assert.equal(a.current().remaining, 17);
-  now += 1; assert.equal(a.current(), null);
+  now += 1; assert.equal(a.current().remaining, 17);
   const fresh = a.invalidate(); a.accept(fresh, quotaData(19));
   a.invalidate(); assert.equal(a.accept(fresh, quotaData(99)), false); assert.equal(a.current(), null);
 });
 
-test('v115 quota: an expired snapshot never revives after a wall-clock rollback', () => {
+test('v115 quota: v122 last capture keeps its timestamp after a wall-clock rollback', () => {
   let now = 100000;
   const q = api.createImageQuotaState({ clock: () => now });
   q.accept(q.invalidate(), quotaData(17));
-  now += api.IMAGE_QUOTA_TTL; assert.equal(q.current(), null);
-  now = 100001; assert.equal(q.current(), null);
+  now += api.IMAGE_QUOTA_TTL; assert.equal(q.current().remaining, 17);
+  now = 100001; assert.equal(q.current().observedAt, 100000);
 });
 
 test('v115 quota: passive inspection preserves exact native promise, response and arguments', async () => {
@@ -222,7 +222,7 @@ test('v115 quota: newer init wins even when an old account response resolves lat
   assert.equal(e.imageQuota.current().remaining, 4);
 });
 
-test('v115 quota: missing schema, HTTP failure, non-JSON, and oversize response clear earlier data', async () => {
+test('v115 quota: v122 missing schema, HTTP failure, non-JSON, and oversize response retain earlier data', async () => {
   for (const make of [
     () => jsonResponse({ limits_progress: [] }),
     () => jsonResponse(quotaData(22), { status: 429 }),
@@ -232,7 +232,7 @@ test('v115 quota: missing schema, HTTP failure, non-JSON, and oversize response 
     const q = api.createImageQuotaState(); q.accept(q.invalidate(), quotaData(8));
     const e = observer(() => Promise.resolve(make()), q);
     await e.win.fetch('/backend-api/conversation/init', { method: 'POST' }); await e.instrument.idle();
-    assert.equal(q.current(), null); assert.deepEqual(e.saved, []);
+    assert.equal(q.current().remaining, 8); assert.deepEqual(e.saved, []);
   }
 });
 
@@ -277,7 +277,7 @@ test('v115 quota UI: small line follows Pro count and shows observed zero withou
   assert.deepEqual(e.errors, []);
 });
 
-test('v115 quota UI: ordinary composer typing preserves a snapshot; outside/account/lifecycle boundaries clear it', async () => {
+test('v115 quota UI: v122 ordinary interaction retains last capture while auth clears it', async () => {
   for (const boundary of ['outside', 'auth', 'blur', 'pagehide', 'visibility']) {
     const e = setup({ fetch: () => Promise.resolve(jsonResponse(quotaData(23))) });
     e.show(); await captureQuota(e);
@@ -288,12 +288,12 @@ test('v115 quota UI: ordinary composer typing preserves a snapshot; outside/acco
     if (boundary === 'auth') await e.win.fetch('/api/auth/session', { method: 'GET' });
     if (boundary === 'blur' || boundary === 'pagehide') e.emit(e.win, boundary);
     if (boundary === 'visibility') { e.document.hidden = true; e.emit(e.document, 'visibilitychange'); }
-    assert.match(quotaLine(e), /暂未获取/, boundary);
+    assert.match(quotaLine(e), boundary === 'auth' ? /暂未获取/ : /图片剩余 23 次/, boundary);
     assert.deepEqual(e.errors, []);
   }
 });
 
-test('v115 quota UI: an exact-expiry timer clears a shown image snapshot', async () => {
+test('v115 quota UI: v122 elapsed time retains a shown image snapshot', async () => {
   let now = Date.now();
   const e = setup({
     fetch: () => Promise.resolve(jsonResponse(quotaData(23))),
@@ -301,7 +301,7 @@ test('v115 quota UI: an exact-expiry timer clears a shown image snapshot', async
   });
   e.show(); await captureQuota(e);
   now += api.IMAGE_QUOTA_TTL; e.flush(api.IMAGE_QUOTA_TTL);
-  assert.match(quotaLine(e), /暂未获取/);
+  assert.match(quotaLine(e), /图片剩余 23 次/);
   assert.deepEqual(e.errors, []);
 });
 

@@ -13,6 +13,13 @@ const response = (data, meta = {}) => {
 };
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const challenge = difficulty => ({ proofofwork: { difficulty, required: true, seed: 'SYNTHETIC-SEED-PRIVATE', nonce: 'SYNTHETIC-NONCE-PRIVATE' }, token: 'SYNTHETIC-TOKEN-PRIVATE' });
+test('v122 PoW retains last capture until new valid data or an account fence', () => {
+  let now=1000;const pow=api.createPowState({clock:()=>now});
+  pow.accept(pow.invalidate(),challenge('00ab'));const pending=pow.invalidate(false);
+  now=100000;assert.equal(pow.accept(pending,{}),false);assert.deepEqual(pow.current(),{difficulty:'00ab',required:true,observedAt:1000});
+  pow.accept(pending,challenge('00cd'));assert.equal(pow.current().difficulty,'00cd');
+  pow.invalidate();assert.equal(pow.current(),null);assert.equal(pow.accept(pending,challenge('00ff')),false);
+});
 function observe(fetch, extra = {}) {
   const saved = [], win = { location: { href: 'https://chatgpt.com/' }, fetch };
   const observer = api.installObserver(win, { save: row => saved.push(row), ledger: () => 'default', ...extra });
