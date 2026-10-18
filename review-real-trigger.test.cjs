@@ -47,8 +47,8 @@ function setup(layout = 'form', overrides = {}) {
   const hover = () => d.getElementById('chatgpt-pro-local-hover');
   const show = (target = trigger.button) => { e.emit(d, 'pointerover', { target }); e.flush(150); };
   const hide = () => e.emit(d, 'keydown', { key: 'Escape' });
-  const shown = () => { assert.equal(hover().hidden, false); assert.equal(e.ui().querySelector('.panel'), null, 'persistent panel is closed'); assert.deepEqual(e.errors, []); };
-  return { ...e, ...trigger, outer, editorParent, editor, makeTrigger, hover, show, hide, shown };
+  const staysClosed = () => { assert.equal(hover().hidden, true); assert.equal(e.ui().querySelector('.panel'), null, 'persistent panel is closed'); assert.deepEqual(e.errors, []); };
+  return { ...e, ...trigger, outer, editorParent, editor, makeTrigger, hover, show, hide, staysClosed };
 }
 
 test('actual trigger: hidden 思考强度 and visible Pro remain concatenated in the fixture', () => {
@@ -58,32 +58,31 @@ test('actual trigger: hidden 思考强度 and visible Pro remain concatenated in
   assert.equal(e.button.getAttribute('data-codex-intelligence-trigger'), 'true');
   assert.equal(e.button.getAttribute('data-composer-navigation-target'), 'reasoning');
   assert.equal(e.hiddenLabel.getAttribute('aria-hidden'), 'true');
-  e.show(e.visibleLabel); e.shown();
-  assert.match(e.hover().shadow.textContent, /剩余/);
+  e.show(e.visibleLabel); e.staysClosed();
 });
 
 test('actual trigger: an inner composer-background does not hide the outer form relationship', () => {
   const e = setup('inner-background');
   assert.equal(e.editor.closest('#composer-background').contains(e.button), false);
   assert.equal(e.editor.closest('form').contains(e.button), true);
-  e.show(e.path); e.shown();
+  e.show(e.path); e.staysClosed();
 });
 
 test('actual trigger: an inner composer marker does not hide the outer form relationship', () => {
-  const e = setup('inner-known'); e.show(e.visibleLabel); e.shown();
+  const e = setup('inner-known'); e.show(e.visibleLabel); e.staysClosed();
 });
 
 test('actual trigger: a nearest editor-only form does not hide a containing unified composer', () => {
   const e = setup('outer-known');
   assert.equal(e.editor.closest('form').contains(e.button), false);
   assert.equal(e.editor.closest('[data-type="unified-composer"]').contains(e.button), true);
-  e.show(); e.shown();
+  e.show(); e.staysClosed();
 });
 
 test('actual trigger: an editor-only form still allows its nearby sibling trigger in a generic composer', () => {
   const e = setup('outer-generic');
   assert.equal(e.editor.closest('form').contains(e.button), false);
-  e.show(e.path); e.shown();
+  e.show(e.path); e.staysClosed();
 });
 
 test('actual trigger: semantic markers with an unknown visible model fail closed', () => {
@@ -94,24 +93,24 @@ test('actual trigger: semantic markers with an unknown visible model fail closed
 
 test('actual trigger: hidden descendants are clickable descendants, but a hidden whole trigger is excluded', () => {
   const e = setup();
-  e.show(e.hiddenLabel); e.shown(); e.hide();
+  e.show(e.hiddenLabel); e.staysClosed(); e.hide();
   e.button.setAttribute('aria-hidden', 'true'); e.show(e.path);
   assert.equal(e.hover().hidden, true);
 });
 
-test('actual trigger: pointer movement across the Pro text, chevron and whole button keeps the card', () => {
-  const e = setup('inner-background'); e.show(e.visibleLabel); e.shown();
+test('actual trigger: pointer movement across the Pro text, chevron and whole button leaves the card closed', () => {
+  const e = setup('inner-background'); e.show(e.visibleLabel); e.staysClosed();
   for (const [target, relatedTarget] of [[e.visibleLabel, e.path], [e.path, e.button], [e.button, e.svg]]) {
     e.emit(e.document, 'pointerout', { target, relatedTarget });
     e.emit(e.document, 'pointerover', { target: relatedTarget, relatedTarget: target });
-    e.flush(300); e.shown();
+    e.flush(300); e.staysClosed();
   }
 });
 
-test('actual trigger: keyboard focus works and the native model shortcut/click stays intact', () => {
+test('actual trigger: keyboard focus leaves the card closed and native model shortcuts/clicks intact', () => {
   const e = setup('inner-background');
   const before = e.button.outerHTML;
-  e.emit(e.document, 'focusin', { target: e.button }); e.flush(150); e.shown();
+  e.emit(e.document, 'focusin', { target: e.button }); e.flush(150); e.staysClosed();
   const key = e.emit(e.document, 'keydown', { key: 'M', code: 'KeyM', ctrlKey: true, shiftKey: true });
   assert.equal(key.defaultPrevented, undefined); assert.equal(key.propagationStopped, undefined);
   const click = e.emit(e.document, 'click', { target: e.path });
@@ -126,12 +125,11 @@ test('actual trigger: the native shortcut tooltip below Pro is left untouched', 
   tooltip._rect = { left: 800, right: 1066, top: 710, bottom: 770, width: 266, height: 60 };
   e.document.body.appendChild(tooltip);
   const before = tooltip.outerHTML;
-  e.show(); e.shown();
+  e.show(); e.staysClosed();
   assert.equal(tooltip.outerHTML, before);
   assert.equal(tooltip.hidden, undefined);
   assert.equal(tooltip.isConnected, true);
-  const own = e.hover(), top = Number.parseFloat(own.style.top);
-  assert.ok(top + own.getBoundingClientRect().height < e.button.getBoundingClientRect().top, 'counter card goes above a lower-page trigger');
+  assert.equal(e.hover().hidden, true);
 });
 
 test('actual trigger: identical attributes outside the composer still do not qualify', () => {
@@ -156,13 +154,13 @@ test('actual trigger: stale semantic model attributes never override stop or mic
 });
 
 test('actual trigger: replacement of the observed composer requires no new listener registration', () => {
-  const e = setup('inner-background'); e.show(); e.shown();
+  const e = setup('inner-background'); e.show(); e.staysClosed();
   e.outer.remove(); e.mutate(); assert.equal(e.hover().hidden, true);
   const replacement = e.document.createElement('form');
   const inner = e.document.createElement('div'); inner.id = 'composer-background';
   const editor = e.document.createElement('div'); editor.id = 'prompt-textarea';
   inner.appendChild(editor); replacement.appendChild(inner); e.document.body.appendChild(replacement);
-  const fresh = e.makeTrigger(replacement); e.show(fresh.path); e.shown();
+  const fresh = e.makeTrigger(replacement); e.show(fresh.path); e.staysClosed();
   assert.equal(e.document.listeners.pointerover.length, 1);
   assert.equal(e.document.listeners.focusin.length, 1);
 });
@@ -173,16 +171,16 @@ test('actual trigger: diagnostics contain fixed reasons and counts, not DOM text
   e.button.setAttribute('data-private-url', 'https://private.invalid/PRIVATE-URL');
   e.editor.textContent = 'PRIVATE-CHAT-TEXT';
   e.hiddenLabel.textContent = 'PRIVATE-HIDDEN-MEASUREMENT';
-  e.show(e.path); e.shown();
+  e.show(e.path); e.staysClosed();
   e.menus.find(menu => menu.label === '诊断 Pro 计数器').fn();
   const diagnostic = e.alerts.at(-1);
   assert.match(diagnostic, /悬停监听: installed/);
   assert.match(diagnostic, /可见输入框: 1/);
   assert.match(diagnostic, /可见模型标记: 1/);
   assert.match(diagnostic, /最近悬停事件: pointerover/);
-  assert.match(diagnostic, /最近控件匹配: model-marker/);
+  assert.match(diagnostic, /最近控件匹配: unrecognized-control/);
   assert.match(diagnostic, /最近输入框范围: explicit-composer/);
-  assert.match(diagnostic, /浮卡状态: visible-above/);
+  assert.match(diagnostic, /浮卡状态: hidden/);
   assert.doesNotMatch(diagnostic, /PRIVATE|private\.invalid|ModelPicker|<button|radix-/);
 });
 

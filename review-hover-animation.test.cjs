@@ -68,14 +68,14 @@ test('review: semantic composer send anchors work without visible send text', ()
   }
 });
 
-test('review: a native non-button Pro dropdown resolves from its visible label and chevron', () => {
+test('review: a native non-button Pro dropdown never opens the card from label, chevron or focus', () => {
   const e = setup({ selectedPro: false });
   const pro = e.control('', { tabindex: '0', 'aria-haspopup': 'menu' }, 'div');
   const label = e.document.createElement('span'); label.textContent = 'Pro'; pro.appendChild(label);
   const { path } = e.nested(pro);
-  e.show(label); e.expectShown(); e.hide();
-  e.show(path); e.expectShown(); e.hide();
-  e.emit(e.document, 'focusin', { target: pro }); e.flush(150); e.expectShown();
+  e.show(label); assert.equal(e.hover().hidden, true);
+  e.show(path); assert.equal(e.hover().hidden, true);
+  e.emit(e.document, 'focusin', { target: pro }); e.flush(150); assert.equal(e.hover().hidden, true);
 });
 
 test('review: control ancestors are checked when an inner role-button has no label', () => {

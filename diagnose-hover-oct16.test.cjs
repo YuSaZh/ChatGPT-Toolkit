@@ -136,15 +136,15 @@ test('current hover: hidden, offscreen and excluded-region anchors stay rejected
   }
 });
 
-test('current hover: explicit model markers no longer depend on a visible editor', () => {
+test('current hover: model markers never open cards, with or without Pro selection', () => {
   for (const mode of ['pro', 'all']) for (const modelText of ['Pro', 'Thinking']) {
     const e = setup({ mode, modelText }), allowed = mode === 'all' || modelText === 'Pro';
     assert.equal(e.composerFor(e.model), null); assert.equal(e.selectionScope(e.model), e.form);
     const { anchor, detail } = audit(e, e.model);
-    assert.equal(anchor, allowed ? e.model : null);
-    assert.equal(detail.match, allowed ? 'model-marker' : 'selected-model-not-pro-or-unknown');
+    assert.equal(anchor, null);
+    assert.equal(detail.match, 'unrecognized-control');
     assert.equal(detail.scope, 'explicit-marker-composer');
-    e.dispatch(e.model, 'pointerenter', { bubbles: false }); e.flush(150); assert.equal(e.hover().hidden, !allowed);
+    e.dispatch(e.model, 'pointerenter', { bubbles: false }); e.flush(150); assert.equal(e.hover().hidden, true);
     quiet(e);
   }
 });
@@ -173,7 +173,7 @@ test('current hover: no-editor diagnostics report accepted voice/model separatel
   assert.equal(e.diagnostics.state.hoverMarkers, 1); assert.equal(e.diagnostics.state.hoverRawMarkers, 1);
   assert.equal(e.diagnostics.state.hoverRawVoices, 1);
   assert.equal(e.diagnostics.state.hoverVoiceCheck, 'voice-start-control/direct-voice-start-anchor');
-  assert.equal(e.diagnostics.state.hoverModelCheck, 'model-marker/explicit-marker-composer'); quiet(e);
+  assert.equal(e.diagnostics.state.hoverModelCheck, 'unrecognized-control/explicit-marker-composer'); quiet(e);
 });
 
 test('current hover: candidate rejection audits preserve the latest event match/scope', () => {
@@ -215,7 +215,7 @@ test('current hover: actual menu report contains only fixed reasons and preserve
   const timerKeys = [...e.timeouts.keys()], ui = e.ui().innerHTML;
   const report = e.report();
   assert.match(report, /语音锚点检查: voice-start-control\/direct-voice-start-anchor/);
-  assert.match(report, /模型锚点检查: model-marker\/explicit-marker-composer/);
+  assert.match(report, /模型锚点检查: unrecognized-control\/explicit-marker-composer/);
   assert.match(report, /最近悬停事件: pointerover/); assert.match(report, /最近控件匹配: no-control/); assert.match(report, /最近输入框范围: unchecked/);
   assert.doesNotMatch(report, /SYNTHETIC_PRIVATE|private\.invalid|credential|<button|data-testid|composer-speech-button/);
   assert.equal(e.form.outerHTML, native); assert.equal(JSON.stringify([...e.store]), stored);

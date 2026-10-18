@@ -25,12 +25,12 @@ function setup(saved) {
   w.GM_getValue=(key,fallback)=>store.has(key)?store.get(key):fallback;
   w.GM_setValue=(key,value)=>{writes.push(key);store.set(key,value)};
   w.GM_listValues=()=>[...store.keys()];w.GM_registerMenuCommand=(name,fn)=>menus.push({name,fn});
-  w.GM_info={scriptHandler:'Tampermonkey',script:{version:'1.1.19'}};
+  w.GM_info={scriptHandler:'Tampermonkey',script:{version:'1.1.20'}};
   w.unsafeWindow=w;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});w.alert=text=>alerts.push(text);
   w.eval(source);
   return {w,store,before,writes,menus,added,scans,requests,errors,shadowRoots,alerts,nativeCall,originalMain,answer,get clones(){return clones},get assignments(){return assignments},close(){for(const observer of observers)observer.disconnect();dom.window.close()}};
 }
-for(const saved of [true,false]) test(`safety rollback preserves saved ${saved} while leaving native message markup and module entry untouched`,async()=>{
+for(const saved of [true,false]) test(`passive display preserves saved ${saved} while leaving native message markup and module entry untouched`,async()=>{
  const e=setup(saved);
  try{
   await sleep();
@@ -44,15 +44,14 @@ for(const saved of [true,false]) test(`safety rollback preserves saved ${saved} 
   const root=e.shadowRoots.find(entry=>entry.host.id==='chatgpt-pro-local-counter').root;
   root.querySelector('[data-action="settings"]').click();
   const on=root.querySelector('#message-info-on'),off=root.querySelector('#message-info-off');
-  assert.equal(on.disabled,true);assert.equal(off.disabled,true);assert.equal(on.getAttribute('aria-pressed'),String(saved));
-  assert.match(root.querySelector('#message-info-status').textContent,/暂停/);
-  on.dispatchEvent(new e.w.MouseEvent('click',{bubbles:true}));off.dispatchEvent(new e.w.MouseEvent('click',{bubbles:true}));
-  e.menus.find(menu=>menu.name==='诊断 Pro 计数器').fn();assert.match(e.alerts.at(-1),/消息信息: paused-safety/);assert.match(e.alerts.at(-1),/只读模块注入: paused-safety/);
+  assert.equal(on.disabled,false);assert.equal(off.disabled,false);assert.equal(on.getAttribute('aria-pressed'),String(saved));
+  assert.match(root.querySelector('#message-info-status').textContent,/实际响应模型/);
+  e.menus.find(menu=>menu.name==='诊断 Pro 计数器').fn();assert.match(e.alerts.at(-1),new RegExp('消息信息: '+(saved?'on':'off')));assert.match(e.alerts.at(-1),/只读模块注入: disabled-native-snapshots/);
   assert.equal(JSON.stringify([...e.store]),e.before,'all pre-existing persistent values are preserved');
   assert.deepEqual(e.writes,[],'no stored preference is silently overwritten');
   assert.equal(e.w.document.querySelector('main').innerHTML,e.originalMain,'no fallback labels or native markup changes');
   assert.equal(e.w.document.querySelector('[data-chatgpt-toolkit-info],.chatgpt-toolkit-message-info'),null);
-  assert.ok(!e.scans.some(s=>String(s).includes('[data-message-id]')),'no legacy/native metadata scan');
+  assert.equal(e.w.document.querySelector('main .chatgpt-toolkit-message-info'),null,'labels never enter native message markup');
   const receiver={},input='/backend-api/conversation/test-chat',init={method:'GET'};
   assert.equal(Reflect.apply(e.w.fetch,receiver,[input,init]),e.answer,'counter observer preserves promise identity');
   await sleep();

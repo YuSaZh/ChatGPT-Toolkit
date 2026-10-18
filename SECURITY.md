@@ -1,6 +1,10 @@
 # ChatGPT Toolkit：被动观察与网络行为审查
 
-## 1.1.19 安全暂停
+## 1.1.20 当前显示路径
+
+生产代码只从 React 已提交结构读取白名单标量，在提交后向原生操作栏添加工具自有的内联 span。保留原有节点及属性，不包装原生组件、不修改 sourcesAction、不安装 Function.call 钩子，不调用应用 getter / subscribe / require，不为消息标签读取历史响应正文。思考强度仅取 thinking_effort，不从模型菜单推断。账号相关自然请求会在原 fetch 之前清除显示和已观察快照；原 Promise、参数和错误保持。旧模块注入实现只保留作历史回归，未从生产启动入口调用。
+
+## 1.1.19 历史安全暂停
 
 本版通过启动入口内固定安全闸，完全跳过页面 metadata runtime 启动：不插入其 script / meta，不安装它的 Function.call / webpack / fetch 包装，不建立 React UI 包装；旧 DOM / Fiber 元数据采集与标签挂载同样不启动，原计数观察器不接收消息 metadata state。生成代码和独立测试保留供后续修复研究，不在已安装脚本中执行。
 

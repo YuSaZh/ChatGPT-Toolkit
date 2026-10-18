@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const source = fs.readFileSync(path.join(__dirname, 'chatgpt-pro-counter.user.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, 'chatgpt-pro-counter.user.js'), 'utf8').replace(/\r\n/g, '\n');
 const header = source.match(/^\/\/ ==UserScript==\n([\s\S]*?)\/\/ ==\/UserScript==/)[1];
 const values = key => [...header.matchAll(new RegExp('^// @' + key + '\\s+(.+)$', 'gm'))].map(match => match[1].trim());
 const raw = 'https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js';
@@ -15,7 +15,7 @@ test('release uses Toolkit name and preserves persistent v1 storage namespace', 
 });
 
 test('release uses versioned GitHub update and install metadata', () => {
-  assert.deepEqual(values('version'), ['1.1.19']);
+  assert.deepEqual(values('version'), ['1.1.20']);
   assert.deepEqual(values('updateURL'), [raw]);
   assert.deepEqual(values('downloadURL'), [raw]);
   assert.deepEqual(values('homepageURL'), ['https://github.com/YuSaZh/ChatGPT-Toolkit']);

@@ -26,7 +26,7 @@ function setup(options = {}) {
 
 test('v119: requested rename preserves namespace and data format', () => {
   assert.equal(meta('name'), 'ChatGPT Toolkit'); assert.equal(meta('namespace'), 'local.chatgpt.pro-counter');
-  assert.equal(api.PREFIX, 'gpc.v1.'); assert.equal(meta('version'), '1.1.19');
+  assert.equal(api.PREFIX, 'gpc.v1.'); assert.equal(meta('version'), '1.1.20');
   const data = api.snapshot(api.defaultSettings(), []);
   assert.equal(data.format, 'chatgpt-pro-counter'); assert.equal(data.version, 1);
   assert.ok(fs.existsSync(path.join(__dirname, 'chatgpt-pro-counter.user.js')));

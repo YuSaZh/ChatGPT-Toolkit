@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "test": "node run.cjs && node run-module.cjs && node --test module-bootstrap.test.cjs module-account-fence.test.cjs serialized-page-runtime.test.cjs safety-rollback.test.cjs hydration-regression.test.cjs"
+    "test": "node run.cjs && node run-module.cjs && node --test module-bootstrap.test.cjs module-account-fence.test.cjs serialized-page-runtime.test.cjs safety-rollback.test.cjs hydration-regression.test.cjs passive-inline.test.cjs"
   },
   "devDependencies": {
     "esbuild": "0.25.12",

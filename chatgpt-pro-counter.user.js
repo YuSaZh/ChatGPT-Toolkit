@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.19
+// @version      1.1.20
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -32,7 +32,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: '1.1.19', phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: "1.1.20", phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null, inspectStorage: null, inspectMessageInfo: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -463,7 +463,8 @@
     const createdAt = typeof message.create_time === 'number' && finiteDate(message.create_time * 1000) ? message.create_time * 1000 : null;
     const resolved = role === 'assistant' ? slug(metadata?.resolved_model_slug) || slug(metadata?.server_ste_metadata?.model_slug) : '';
     const label = role === 'assistant' ? slug(metadata?.model_slug) : '';
-    return { id, conversation, role, createdAt, model: resolved || label, rank: resolved ? 2 : label ? 1 : 0 };
+    const effort = role === 'assistant' && typeof metadata?.thinking_effort === 'string' && /^[a-z][a-z0-9_-]{0,31}$/i.test(metadata.thinking_effort) ? metadata.thinking_effort : '';
+    return { id, conversation, role, createdAt, model: resolved || label, effort, rank: resolved ? 2 : label ? 1 : 0 };
   }
   function createMessageInfoState({ page, changed = () => {}, enabled = true, limit = 500 } = {}) {
     let active = !!enabled, epoch = 0, path = '', provisional = '', transition = null, nativeReader = null, moduleBridge = null;
@@ -657,7 +658,7 @@
       attachedCount++;
       const seen = new Set(), path = [];
       let current = null;
-      for (let node = attached, depth = 0; node && typeof node === 'object' && depth < 256 && !seen.has(node); node = dataProperty(node, 'return'), depth++) {
+      for (let node = attached, depth = 0; node && typeof node === 'object' && depth < 1024 && !seen.has(node); node = dataProperty(node, 'return'), depth++) {
         if (located.has(node)) { current = located.get(node); break; }
         seen.add(node); path.push(node);
         const root = dataProperty(node, 'stateNode'), candidate = dataProperty(root, 'current');
@@ -671,7 +672,7 @@
     let steps = 0;
     while (stack.length && ++steps <= 24000) {
       const { fiber, parent, depth } = stack.pop();
-      if (!fiber || typeof fiber !== 'object' || members.has(fiber) || depth > 256) continue;
+      if (!fiber || typeof fiber !== 'object' || members.has(fiber) || depth > 1024) continue;
       members.add(fiber); parents.set(fiber, parent); fibers.push(fiber);
       const sibling = dataProperty(fiber, 'sibling'); if (sibling && parent) stack.push({ fiber: sibling, parent, depth });
       const props = dataProperty(fiber, 'memoizedProps'), tag = dataProperty(fiber, 'tag');
@@ -692,7 +693,7 @@
       },
       chain(element) {
         const chain = [];
-        for (let fiber = hosts.get(element); fiber && chain.length <= 256; fiber = parents.get(fiber)) chain.push(fiber);
+        for (let fiber = hosts.get(element); fiber && chain.length <= 1024; fiber = parents.get(fiber)) chain.push(fiber);
         return roots.has(chain.at(-1)) ? chain : [];
       }
     };
@@ -791,7 +792,7 @@
       const author = dataProperty(value, 'author'), metadata = dataProperty(value, 'metadata'), route = dataProperty(metadata, 'server_ste_metadata');
       return {
         id: dataProperty(value, 'id'), author: { role: dataProperty(author, 'role') }, recipient: dataProperty(value, 'recipient'), create_time: dataProperty(value, 'create_time'),
-        metadata: { is_visually_hidden_from_conversation: dataProperty(metadata, 'is_visually_hidden_from_conversation'), model_slug: dataProperty(metadata, 'model_slug'), resolved_model_slug: dataProperty(metadata, 'resolved_model_slug'), server_ste_metadata: { model_slug: dataProperty(route, 'model_slug') } }
+        metadata: { is_visually_hidden_from_conversation: dataProperty(metadata, 'is_visually_hidden_from_conversation'), model_slug: dataProperty(metadata, 'model_slug'), resolved_model_slug: dataProperty(metadata, 'resolved_model_slug'), thinking_effort: dataProperty(metadata, 'thinking_effort'), server_ste_metadata: { model_slug: dataProperty(route, 'model_slug') } }
       };
     }
     return {
@@ -900,7 +901,16 @@
     };
   }
   const messageBadgeCache = new WeakMap();
-  function renderMessageInfo(doc, state, badges, nativeReader) {
+  function formatMessageTime(createdAt, now = Date.now()) {
+    if (!finiteDate(createdAt)) return '';
+    const date = new Date(createdAt), today = new Date(now);
+    const days = Math.round((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())) / 86400000);
+    const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    if (days === 0) return time;
+    const prefix = days > 0 && days <= 7 ? date.toLocaleDateString([], { weekday: 'short' }) : date.toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' });
+    return `${prefix} ${time}`;
+  }
+  function renderMessageInfo(doc, state, badges, nativeReader, display) {
     state.syncPage();
     nativeReader ||= state.nativeReader?.(doc);
     nativeReader?.begin(state.enabled());
@@ -918,27 +928,65 @@
         else if (native) { report.messageNative++; row = row ? { ...native, createdAt: native.createdAt ?? row.createdAt, model: row.rank > native.rank ? row.model : native.model } : native; }
       }
       if (!row || (!row.createdAt && !row.model)) continue;
-      found.add(element);
       let badge = badges.get(element);
-      if (!badge || badge.parentNode !== element) {
+      const parent = display ? display.parent(target) : element;
+      if (!parent) continue;
+      found.add(element);
+      if (!badge || badge.parentNode !== parent) {
         badge?.remove(); badge = doc.createElement('span'); badge.className = 'chatgpt-toolkit-message-info';
         badge.style.cssText = 'display:block;max-width:100%;margin-top:6px;font:11px/1.5 system-ui,sans-serif;color:inherit;opacity:.65;overflow-wrap:anywhere;user-select:text;';
-        element.appendChild(badge); badges.set(element, badge);
+        parent.appendChild(badge); badges.set(element, badge);
       }
-      const renderKey = JSON.stringify([row.id, row.conversation, row.role, row.createdAt, row.model]);
-      if (messageBadgeCache.get(badge) === renderKey) continue;
+      const now = new Date();
+      const renderKey = JSON.stringify([row.id, row.conversation, row.role, row.createdAt, row.model, row.effort, now.getFullYear(), now.getMonth(), now.getDate(), now.getTimezoneOffset()]);
+      if (messageBadgeCache.get(badge) === renderKey) { display?.place(badge, target); continue; }
       messageBadgeCache.set(badge, renderKey);
       const date = row.createdAt ? new Date(row.createdAt) : null;
-      const text = [date?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }), row.model].filter(Boolean).join(' · ');
-      const title = [date ? `消息创建时间（本地）：${date.toLocaleString()} (${date.toISOString()})` : '', row.model ? `响应模型：${row.model}` : ''].filter(Boolean).join('\n');
+      const time = date ? formatMessageTime(row.createdAt, now.getTime()) : '';
+      const text = (display ? [row.model, row.effort, time] : [time, row.model, row.effort]).filter(Boolean).join(display ? '  ' : ' · ');
+      const title = [date ? `消息创建时间（本地）：${date.toLocaleString()} (${date.toISOString()})` : '', row.model ? `响应模型：${row.model}` : '', row.effort ? `思考强度：${row.effort}` : ''].filter(Boolean).join('\n');
       if (badge.textContent !== text) badge.textContent = text;
       if (badge.getAttribute('title') !== title) badge.setAttribute('title', title);
       if (badge.getAttribute('aria-label') !== title) badge.setAttribute('aria-label', title);
+      display?.place(badge, target);
     }
     for (const [element, badge] of badges) if (!found.has(element)) { badge.remove(); badges.delete(element); }
     report.messageBadges = found.size;
     nativeReader?.end?.();
     return { ...report, ...nativeReader?.report() };
+  }
+  // Add only our own span after the native tree has committed. Never wrap
+  // components, move native children, change sourcesAction or call store hooks.
+  function createInlineMessageDisplay(doc) {
+    const owned = new Set();
+    const connected = element => !!element && element.nodeType === 1 && element.isConnected;
+    function actionRow(target) {
+      const current = dataProperty(dataProperty(target.props, 'actionRowRef'), 'current');
+      if (connected(current) && target.element.contains(current)) return current;
+      const copy = Array.from(target.element.querySelectorAll('button')).find(button =>
+        /^(?:copy(?: response| message)?|复制(?:回复|消息)?|複製(?:回覆|訊息)?)$/i.test(button.getAttribute('aria-label') || '') ||
+        /^(?:copy-turn-action-button|copy-turn-action|copy-message-button)$/.test(button.getAttribute('data-testid') || ''));
+      for (let node = copy?.parentElement, depth = 0; node && target.element.contains(node) && depth < 5; node = node.parentElement, depth++) {
+        if (node.querySelectorAll('button').length >= 2) return node;
+      }
+      return null;
+    }
+    return {
+      parent(target) {
+        for (const badge of owned) if (!badge.isConnected) owned.delete(badge);
+        if (!connected(target.element) || target.element.closest('[hidden],[aria-hidden="true"],[inert]')) return null;
+        return target.role === 'assistant' ? actionRow(target) : target.element;
+      },
+      place(badge, target) {
+        if (owned.has(badge)) return;
+        owned.add(badge);
+        badge.style.cssText = target.role === 'assistant'
+          ? 'display:inline-block;position:static;align-self:center;flex:0 1 auto;min-width:0;max-width:100%;margin-inline-start:8px;font:12px/18px system-ui,sans-serif;color:var(--text-tertiary,#888);white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;'
+          : 'display:block;position:static;width:100%;box-sizing:border-box;margin-top:4px;text-align:end;font:12px/18px system-ui,sans-serif;color:var(--text-tertiary,#888);white-space:pre-wrap;user-select:text;';
+      },
+      owns(node) { for (const badge of owned) if (node === badge || badge.contains(node)) return true; return false; },
+      clear() { for (const badge of owned) badge.remove(); owned.clear(); },
+    };
   }
   function installObserver(win, { save, ledger, changed = () => {}, clock = Date.now, random = uuid, hash = digest, inspect = inspectResponse, imageQuota, pow, account, captureLedger, messageInfoState }) {
     const original = win.fetch;
@@ -1657,24 +1705,17 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     // Local appearance preference, deliberately outside the shared v1 ledger
     // schema: older sync peers cannot drop or overwrite it. Missing/invalid => Pro.
     let hoverMode = 'pro';
-    // Version safety gate: do not touch the page's module/React/metadata paths.
-    // A full page refresh is required to discard an older installed bridge.
-    const MESSAGE_METADATA_SAFETY_PAUSED = true;
+    // The unsafe module bridge stays dormant. Production only reads already
+    // committed native snapshots and appends its own inline spans after commit.
     let messageInfoPreference = true;
-    let messageInfoTimer, messageInfoReadError = false, moduleMetadataBridge;
+    let messageInfoTimer, messageInfoReadError = false;
     const messageBadges = new Map();
+    const messageDisplay = createInlineMessageDisplay(document);
     function refreshMessageInfo() {
-      if (MESSAGE_METADATA_SAFETY_PAUSED) return { messageEnabled: 'paused-safety', messageInjection: 'paused-safety', messageBadges: 0, messageNative: 0 };
-      const injection = moduleMetadataBridge?.inspect();
-      if (diagnostics && injection) Object.assign(diagnostics.state, { messageInjection: [injection.bootstrap, injection.hook, injection.runtime, injection.patch].join(' / '), messageInjectionFactories: injection.factories, messageMappingCandidate: injection.mappingCandidates + ' / ' + injection['mapping-reason'], messageInjectionKinds: [injection['mapping-factory'], injection['message-factory'], injection['boundary-factory']].join(' / '), messageMappingCalls: injection.mappingCalls, messageFetchObserved: injection.fetches, messageObservedMappings: injection.mapping, messageRendererCommits: injection.renderer, messageInjectedLabels: injection.labels, messageInjectionAccount: injection.account + ' / ' + injection['account-fence'] });
-      if (moduleMetadataBridge?.active() || injection?.account === 'paused-account') {
-        for (const badge of messageBadges.values()) badge.remove(); messageBadges.clear();
-        return { messageEnabled: messageInfoState.enabled() ? 'on' : 'off', messageBadges: Number(injection.labels) || 0, messageNative: Number(injection.rows) || 0 };
-      }
-      return renderMessageInfo(document, messageInfoState, messageBadges);
+      if (diagnostics) diagnostics.state.messageInjection = 'disabled-native-snapshots';
+      return renderMessageInfo(document, messageInfoState, messageBadges, undefined, messageDisplay);
     }
     function scheduleMessageInfo() {
-      if (MESSAGE_METADATA_SAFETY_PAUSED) return;
       if (messageInfoTimer) return;
       messageInfoTimer = setTimeout(() => {
         messageInfoTimer = null;
@@ -1682,7 +1723,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       }, 200);
     }
     const messageInfoState = createMessageInfoState({ page: () => win.location.href, changed: scheduleMessageInfo, enabled: false });
-    if (!MESSAGE_METADATA_SAFETY_PAUSED) messageInfoState.nativeReader(document);
+    messageInfoState.nativeReader(document);
     if (diagnostics) diagnostics.inspectMessageInfo = () => refreshMessageInfo();
     // Transient UI state; never persisted or included in backups/sync.
     const knownCountKeys = new Set(), queuedIncrements = new Map();
@@ -1744,7 +1785,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       try {
         const next = gmGet(`${PREFIX}ui.messageInfo`, true) !== false;
         const changed = next !== messageInfoPreference || messageInfoReadError;
-        messageInfoPreference = next; messageInfoReadError = false; messageInfoState.setEnabled(!MESSAGE_METADATA_SAFETY_PAUSED && next);
+        messageInfoPreference = next; messageInfoReadError = false; messageInfoState.setEnabled(next);
         if (changed && uiReady) refreshMessageInfoPreference();
       } catch { messageInfoReadError = true; if (uiReady) refreshMessageInfoPreference(); }
       try {
@@ -1885,7 +1926,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       if (tab === 'settings') {
         const d = new Date(settings.anchor); const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         settingsSnapshot = contextSnapshot();
-        body = `<div class="display-setting"><label id="hover-label">悬浮卡显示</label><div class="segmented" role="group" aria-labelledby="hover-label"><button type="button" id="hover-pro" data-action="hover-pro" aria-pressed="${hoverMode === 'pro'}">仅选择 Pro 时</button><button type="button" id="hover-all" data-action="hover-all" aria-pressed="${hoverMode === 'all'}">所有模型</button></div><small id="hover-status" role="status">${hoverPreferenceHint()}</small></div><div class="display-setting"><label id="message-info-label">消息时间与模型</label><div class="segmented" role="group" aria-labelledby="message-info-label"><button type="button" id="message-info-on" data-action="message-info-on" aria-pressed="${messageInfoPreference}"${MESSAGE_METADATA_SAFETY_PAUSED ? ' disabled' : ''}>显示</button><button type="button" id="message-info-off" data-action="message-info-off" aria-pressed="${!messageInfoPreference}"${MESSAGE_METADATA_SAFETY_PAUSED ? ' disabled' : ''}>隐藏</button></div><small id="message-info-status" role="status">${messageInfoPreferenceHint()}</small></div><div class="display-setting"><label id="account-label">按当前账号自动切换账本</label><div class="segmented" role="group" aria-labelledby="account-label"><button type="button" data-action="account-off" id="account-off" aria-pressed="${!account.enabled()}">手动选择</button><button type="button" data-action="account-on" id="account-on" aria-pressed="${account.enabled()}">实验自动识别</button></div><small id="account-status" role="status">${accountPreferenceHint()}</small></div><form id="settings"><label for="cap">本周期上限（自定义，非官方额度）</label><input id="cap" type="number" min="1" max="1000000" value="${settings.cap}" required><label for="mode">统计方式</label><select id="mode"><option value="fixed"${settings.mode === 'fixed' ? ' selected' : ''}>固定七天周期</option><option value="rolling"${settings.mode === 'rolling' ? ' selected' : ''}>滚动最近七天</option></select><label for="anchor">固定周期锚点（你的浏览器当地时间）</label><input id="anchor" type="datetime-local" value="${local}" required><small>填入你确认的重置时间；每 168 小时一个周期。默认是安装当天零点。滚动模式忽略此项。</small><label for="calibrate">当前已用校准为（首次安装可填写）</label><input id="calibrate" type="number" min="0" max="1000000" placeholder="留空保留现值"><small>会添加一条校准记录，不删除历史；以保存后的统计方式计算差额。</small><label for="ledger">账本</label><select id="ledger"${account.enabled() ? ' disabled' : ''}>${[...new Set(['default', settings.ledger, ...records.map(e => e.ledger)])].map(id => `<option value="${esc(id)}"${id === settings.ledger ? ' selected' : ''}>${id === settings.ledger ? esc(settings.label) : id === 'default' ? '默认账本' : id.startsWith('unassigned:') ? `未分配 ${esc(id.slice(11, 19))}` : esc(id.slice(0, 16))}</option>`).join('')}<option value="__new">新建独立账本…</option></select><small>${account.enabled() ? '账本跟随本标签页识别到的登录用户。同一用户的不同工作区共用账本。' : '手动模式：换账号时请选择独立账本。'} 上限、统计方式和周期锚点仍是共用设置，需自行核对；不会自动推断各账号额度。</small><div class="actions"><button class="primary" type="submit">保存设置</button>${button('home', '取消')}</div></form><div class="foot">修改前自动保存本机备份。不同标签页设置冲突时会提醒刷新。</div>`;
+        body = `<div class="display-setting"><label id="hover-label">悬浮卡显示</label><div class="segmented" role="group" aria-labelledby="hover-label"><button type="button" id="hover-pro" data-action="hover-pro" aria-pressed="${hoverMode === 'pro'}">仅选择 Pro 时</button><button type="button" id="hover-all" data-action="hover-all" aria-pressed="${hoverMode === 'all'}">所有模型</button></div><small id="hover-status" role="status">${hoverPreferenceHint()}</small></div><div class="display-setting"><label id="message-info-label">消息时间与模型</label><div class="segmented" role="group" aria-labelledby="message-info-label"><button type="button" id="message-info-on" data-action="message-info-on" aria-pressed="${messageInfoPreference}">显示</button><button type="button" id="message-info-off" data-action="message-info-off" aria-pressed="${!messageInfoPreference}">隐藏</button></div><small id="message-info-status" role="status">${messageInfoPreferenceHint()}</small></div><div class="display-setting"><label id="account-label">按当前账号自动切换账本</label><div class="segmented" role="group" aria-labelledby="account-label"><button type="button" data-action="account-off" id="account-off" aria-pressed="${!account.enabled()}">手动选择</button><button type="button" data-action="account-on" id="account-on" aria-pressed="${account.enabled()}">实验自动识别</button></div><small id="account-status" role="status">${accountPreferenceHint()}</small></div><form id="settings"><label for="cap">本周期上限（自定义，非官方额度）</label><input id="cap" type="number" min="1" max="1000000" value="${settings.cap}" required><label for="mode">统计方式</label><select id="mode"><option value="fixed"${settings.mode === 'fixed' ? ' selected' : ''}>固定七天周期</option><option value="rolling"${settings.mode === 'rolling' ? ' selected' : ''}>滚动最近七天</option></select><label for="anchor">固定周期锚点（你的浏览器当地时间）</label><input id="anchor" type="datetime-local" value="${local}" required><small>填入你确认的重置时间；每 168 小时一个周期。默认是安装当天零点。滚动模式忽略此项。</small><label for="calibrate">当前已用校准为（首次安装可填写）</label><input id="calibrate" type="number" min="0" max="1000000" placeholder="留空保留现值"><small>会添加一条校准记录，不删除历史；以保存后的统计方式计算差额。</small><label for="ledger">账本</label><select id="ledger"${account.enabled() ? ' disabled' : ''}>${[...new Set(['default', settings.ledger, ...records.map(e => e.ledger)])].map(id => `<option value="${esc(id)}"${id === settings.ledger ? ' selected' : ''}>${id === settings.ledger ? esc(settings.label) : id === 'default' ? '默认账本' : id.startsWith('unassigned:') ? `未分配 ${esc(id.slice(11, 19))}` : esc(id.slice(0, 16))}</option>`).join('')}<option value="__new">新建独立账本…</option></select><small>${account.enabled() ? '账本跟随本标签页识别到的登录用户。同一用户的不同工作区共用账本。' : '手动模式：换账号时请选择独立账本。'} 上限、统计方式和周期锚点仍是共用设置，需自行核对；不会自动推断各账号额度。</small><div class="actions"><button class="primary" type="submit">保存设置</button>${button('home', '取消')}</div></form><div class="foot">修改前自动保存本机备份。不同标签页设置冲突时会提醒刷新。</div>`;
       } else if (tab === 'sync') {
         const cfg = getDav(), davMode = cfg.version === 2 ? cfg.mode : cfg.url ? 'file' : 'base';
         body = `<form id="webdav"><div class="callout">可选：把计数记录、模型标记和周期设置存到你自己的 WebDAV 文件。密码仅在本机 Tampermonkey 存储，不随备份导出；不是加密保险箱。</div><label for="dav-mode">地址模式</label><select id="dav-mode"><option value="base"${davMode === 'base' ? ' selected' : ''}>基础目录（自动建立同步目录）</option><option value="file"${davMode === 'file' ? ' selected' : ''}>完整文件地址（兼容旧配置）</option></select><label id="dav-url-label" for="dav-url">${davMode === 'base' ? 'HTTPS 基础目录' : 'HTTPS 文件完整地址'}</label><input id="dav-url" type="url" value="${esc(cfg.url)}" placeholder="${davMode === 'base' ? 'https://你的服务器/dav/' : 'https://你的服务器/dav/pro-counter.json'}" required autocomplete="off"><small id="dav-path-hint">${davMode === 'base' ? '自动在此地址下建立 ChatGPT-Toolkit/，同步文件为 data.json。' : '保留原文件；切换基础目录前请先同步旧文件并导出备份，不自动搬移远端历史。'}</small><label for="dav-user">用户名</label><input id="dav-user" value="${esc(cfg.username)}" autocomplete="off"><label for="dav-pass">密码 / 专用应用密码</label><input id="dav-pass" type="password" placeholder="${cfg.password ? '已保存；留空保留（更换服务器时会清除）' : '建议使用专用应用密码'}" autocomplete="new-password"><label for="dav-interval">自动同步（仅页面打开时）</label><select id="dav-interval">${[0, 5, 15, 30, 60].map(n => `<option value="${n}"${cfg.interval === n ? ' selected' : ''}>${n ? `每 ${n} 分钟` : '关闭，仅手动'}</option>`).join('')}</select><label><input id="dav-approved" type="checkbox" style="width:auto" ${cfg.approved ? 'checked' : ''}> 我同意按所选模式建立同步目录、上传计数记录和周期设置，并在本机保存凭据。</label><div class="actions"><button type="submit" class="primary">测试并保存</button>${button('sync-now', '立即同步')}${button('sync-off', '关闭自动同步')}${button('sync-clear', '清除本机凭据')}</div></form><div id="sync-status" class="callout" role="status">${esc(syncStatus)}${syncBusy ? ' · 正在处理…' : ''}</div><div class="foot">需要 Tampermonkey 5.5.1+。安装时的任意域名网络权限仅用于你填写的 WebDAV。同步不包含聊天正文、Cookie、令牌或 WebDAV 密码。两台设备使用相同模式和地址。需支持强 ETag / 条件 PUT；不跟随重定向。周期设置按更新时间合并，请确保系统时间准确。</div>`;
@@ -1908,13 +1949,12 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       if (accountPending()) throw Error('账号待识别，暂不能校准。可关闭自动识别后手动选择账本。');
       const id = uuid(); save({ v: 1, id, key: `m:${id}`, ledger: settings.ledger, at, updated: at, state: 'manual', observation: 'manual', delta, requested: '', route: '', label: '', stable: true, conflict: false, http: 0 });
     }
-    function messageInfoPreferenceHint() { if (MESSAGE_METADATA_SAFETY_PAUSED) return '本版因页面兼容问题暂停此功能，原显示设置已保留。'; if (messageInfoReadError) return '显示设置读取失败，保留上次选择；首次加载时暂不显示。请检查本机存储。'; return '显示已加载消息的创建时间与响应模型；悬停查看完整时间。仅本机设置。'; }
+    function messageInfoPreferenceHint() { if (messageInfoReadError) return '显示设置读取失败，保留上次选择；首次加载时暂不显示。请检查本机存储。'; return '内联显示实际响应模型、思考强度与时间。近一周显示星期，更早显示日期。'; }
     function refreshMessageInfoPreference(message = '') {
       for (const value of ['on', 'off']) root?.querySelector(`#message-info-${value}`)?.setAttribute('aria-pressed', String(messageInfoPreference === (value === 'on')));
       const status = root?.querySelector('#message-info-status'); if (status) status.textContent = message || messageInfoPreferenceHint();
     }
     function setMessageInfoMode(value) {
-      if (MESSAGE_METADATA_SAFETY_PAUSED) { refreshMessageInfoPreference(); return; }
       try { verifiedSet(`${PREFIX}ui.messageInfo`, !!value); messageInfoPreference = !!value; messageInfoState.setEnabled(value); refreshMessageInfoPreference(); scheduleMessageInfo(); }
       catch { refreshMessageInfoPreference('未保存：本机存储写入失败，仍保留原显示方式。'); }
     }
@@ -2210,11 +2250,8 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       const candidates = [];
       let control = target.closest(controlSelector);
       for (let i = 0; control && i < 4; i++, control = control.parentElement?.closest(controlSelector)) candidates.push(control);
-      // SVG/use events retarget to the entire native button, without annotation
-      // or hitbox changes. Keep the unmarked Pro-dropdown fallback for old UIs.
-      if (!candidates.length) for (let node = target, i = 0; node && i < 4; node = node.parentElement, i++) {
-        if (/^Pro(?:\s*[⌄⌃▾▿∨])?$/i.test(controlText(node))) candidates.push(node);
-      }
+      // Only Send and Start voice trigger cards. Model controls are read only
+      // to apply the optional Pro-only visibility preference.
       for (const el of candidates) {
         if (!visibleControl(el)) { detail.match = 'not-visible'; continue; }
         if (el.closest(excludedRegion)) { detail.match = 'outside-composer'; detail.scope = 'excluded-region'; continue; }
@@ -2235,9 +2272,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
           detail.scope = 'explicit-marker-composer';
         }
         const send = /^(?:send-button|composer-send-button|composer-submit-button)$/.test(testId) || el.id === 'composer-submit-button' || /^(?:send(?: message| prompt)?|submit(?: message| prompt)?|发送(?:消息|提示)?|傳送(?:訊息|提示)?|送信)(?:[\s(（]|$)/i.test(label);
-        const modelMarker = el.getAttribute('data-composer-navigation-target') === 'reasoning' || el.getAttribute('data-codex-intelligence-trigger') === 'true';
-        const pro = /\bPro\b|思考强度|思考強度|思考時間|Thinking|reasoning[- ]?effort|thinking[- ]?(?:level|effort|time)/i.test(label);
-        if (send || modelMarker || pro) { detail.match = send ? 'send-control' : modelMarker ? 'model-marker' : 'model-label'; return finish(el); }
+        if (send) { detail.match = 'send-control'; return finish(el); }
         detail.match = 'unrecognized-control';
       }
       return finish(null);
@@ -2421,13 +2456,11 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     diagnostics?.mark('load-storage');
     load();
     try { if (getDav().enabled) { const last = Number(gmGet(`${PREFIX}lastSync`, 0)); syncStatus = last ? `上次同步 ${fmt(last)}` : 'WebDAV 已配置，尚未完成同步'; } } catch { /* show storage diagnosis */ }
-    if (!MESSAGE_METADATA_SAFETY_PAUSED) try {
-      moduleMetadataBridge = startPageMetadataBridge(win, document, { runtimeSource: pageMetadataRuntime.toString(), transformerSource: metadataTransformerSource, enabled: messageInfoState.enabled(), changed: scheduleMessageInfo });
-      messageInfoState.moduleBridge(moduleMetadataBridge);
-    } catch { if (diagnostics) diagnostics.state.messageInjection = 'bootstrap-failed'; }
     diagnostics?.mark('install-observer');
     try {
-      observer = installObserver(win, { save: saveObserved, ledger: () => { load(); return settings.ledger; }, captureLedger: () => account.enabled() ? account.capture() : settings.ledger, imageQuota, pow, account, messageInfoState: MESSAGE_METADATA_SAFETY_PAUSED ? undefined : messageInfoState });
+      // Fence account boundaries without enabling history/stream body capture
+      // for metadata or installing a second fetch wrapper.
+      observer = installObserver(win, { save: saveObserved, ledger: () => { load(); return settings.ledger; }, captureLedger: () => account.enabled() ? account.capture() : settings.ledger, imageQuota, pow, account, messageInfoState: { invalidate: (...args) => { messageDisplay.clear(); messageBadges.clear(); messageInfoState.invalidate(...args); }, enabled: () => false } });
       if (diagnostics) diagnostics.state.observer = observer.healthy() ? 'installed' : 'not-active';
     } catch (error) {
       storageError = [storageError, '观察器未成功安装。仍可手动计数；请刷新并检查脚本权限。'].filter(Boolean).join(' ');
@@ -2437,10 +2470,10 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     diagnostics?.mark('mount');
     safeMount(); scheduleMessageInfo();
     win.addEventListener('popstate', () => { messageInfoState.syncPage(); scheduleMessageInfo(); });
-    win.addEventListener('pagehide', () => messageInfoState.invalidate());
+    win.addEventListener('pagehide', () => { messageInfoState.invalidate(); messageDisplay.clear(); messageBadges.clear(); });
     document.addEventListener('DOMContentLoaded', safeMount, { once: true });
     // React navigation can replace the body or remove our host. Reattach the same roots.
-    try { new MutationObserver(() => { scheduleMessageInfo(); if (quotaPage !== win.location.href) invalidateImageQuota(); if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'style', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target', 'data-message-id', 'data-message-author-role', 'data-message-model-slug', 'data-turn-key', 'data-user-message-bubble', 'data-content-search-turn-key', 'data-chatgpt-conversation-selection-target', 'data-app-action-timeline-scroll'] }); } catch { /* interval below also recovers */ }
+    try { new MutationObserver(mutations => { if (mutations?.length && mutations.every(change => messageDisplay.owns(change.target))) return; scheduleMessageInfo(); if (quotaPage !== win.location.href) invalidateImageQuota(); if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'style', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target', 'data-message-id', 'data-message-author-role', 'data-message-model-slug', 'data-turn-key', 'data-user-message-bubble', 'data-content-search-turn-key', 'data-chatgpt-conversation-selection-target', 'data-app-action-timeline-scroll'] }); } catch { /* interval below also recovers */ }
     setInterval(() => {
       scheduleMessageInfo();
       const mounted = safeMount(); const before = lastKeys, s = settings.id; load();
@@ -2452,7 +2485,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     diagnostics?.mark('ready');
   }
   return { WEEK, PREFIX, inspectLocalStorage, storageSummary, completeStorage, modelKind, defaultSettings, validSettings, validEvent, windowFor, kindFor, mergeEvents, grouped, summarize,
-    conversationPage, conversationHistoryRequest, messageInfo, createMessageInfoState, createNativeMessageReader, createCommittedMessageIndex, currentItemTargets, currentMessageAncestors, renderMessageInfo, IMAGE_QUOTA_TTL, imageQuotaRequest, parseImageQuota, createImageQuotaState, powRequest, parsePow, createPowState, accountRequest, parseAccountId, createAccountState, requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, webDavTargets, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
+    conversationPage, conversationHistoryRequest, messageInfo, createMessageInfoState, createNativeMessageReader, createCommittedMessageIndex, currentItemTargets, currentMessageAncestors, renderMessageInfo, createInlineMessageDisplay, formatMessageTime, IMAGE_QUOTA_TTL, imageQuotaRequest, parseImageQuota, createImageQuotaState, powRequest, parsePow, createPowState, accountRequest, parseAccountId, createAccountState, requestMeta, digest, targetRequest, readBounded, prepareMeta, parseMetadata, inspectResponse, installObserver, decodeImport, webDavConfig, webDavTargets, supportedManager, createDavTransport, etagOf, newestSettings, snapshot, syncWebDav, renderMarkup, hoverPosition, boot };
 });
 
 
