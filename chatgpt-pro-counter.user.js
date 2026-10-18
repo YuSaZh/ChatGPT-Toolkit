@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.20
+// @version      1.1.21
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -32,7 +32,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: "1.1.20", phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: "1.1.21", phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null, inspectStorage: null, inspectMessageInfo: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -1160,7 +1160,7 @@
         if (method === 'MKCOL' && !cfg.approved) throw Error('请先确认在基础目录下建立同步目录');
         target = method === 'MKCOL' ? paths.directoryUrl : paths.fileUrl;
       } catch (e) { reject(e); return; }
-      let ended = false, handle, timer, streaming = false, streamText, loadedResponse, finalSeen = false, finalStatus = 0;
+      let ended = false, handle, timer, streamReader, streaming = false, streamText, loadedResponse, finalSeen = false, finalStatus = 0;
       const startedAt = Date.now();
       const cancel = () => { end(Error('WebDAV 操作已取消')); try { handle?.abort(); } catch {} };
       const end = (err, result) => {
@@ -1186,13 +1186,20 @@
             if (!response.response || typeof response.response.getReader !== 'function') return;
             streaming = true;
             if ((response.finalUrl && response.finalUrl !== target) || response.status >= 300 && response.status < 400) { end(Error('拒绝重定向；请填写最终 HTTPS 地址')); try { handle?.abort(); } catch {} return; }
-            readBounded(response.response, MAX_IMPORT, timeout).then(text => { streamText = text; finishStream(); }, () => { end(Error('WebDAV 响应超时或超过 5 MB；本机记录已保留')); try { handle?.abort(); } catch {} });
+            readBounded({ getReader: () => (streamReader = response.response.getReader()) }, MAX_IMPORT, timeout).then(text => { streamText = text; finishStream(); }, () => { if (ended) return; end(Error('WebDAV 响应超时或超过 5 MB；本机记录已保留')); try { handle?.abort(); } catch {} });
           },
           onload: response => {
             if (ended) return;
             finalSeen = true; finalStatus = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : 0;
             if ((response.finalUrl && response.finalUrl !== target) || response.status >= 300 && response.status < 400) { end(Error('拒绝重定向；请填写最终 HTTPS 地址')); try { handle?.abort(); } catch {} return; }
             if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599) { end(Error('WebDAV 未收到有效 HTTP 响应；请检查 Tampermonkey 网络权限、网络连接或被拒绝的重定向，本机记录已保留')); try { handle?.abort(); } catch {} return; }
+            // These statuses have no response body. Some managers expose a
+            // stream that never reaches EOF; final onload is authoritative.
+            if ([204, 205].includes(response.status)) {
+              end(null, { ...response, responseText: '' });
+              try { Promise.resolve(streamReader?.cancel()).catch(() => {}); } catch { /* release only our response reader */ }
+              return;
+            }
             if (streaming) { loadedResponse = response; finishStream(); return; }
             if (typeof response.responseText === 'string' && new TextEncoder().encode(response.responseText).byteLength > MAX_IMPORT) { end(Error('远端文件超过 5 MB，已停止同步')); return; }
             if (response.status === 200 && typeof response.responseText !== 'string') { end(Error('脚本管理器未提供可读响应；请更新 Tampermonkey')); return; }
@@ -1229,7 +1236,10 @@
     let backedUp = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       check();
-      const response = await request(cfg, 'GET', { Accept: 'application/json', 'Cache-Control': 'no-cache' }, undefined, options.signal);
+      // Compressed representations can have a different ETag (e.g. Apache's
+      // -gzip suffix). Obtain the identity representation and use its exact
+      // validator for PUT; never strip suffixes or drop the write condition.
+      const response = await request(cfg, 'GET', { Accept: 'application/json', 'Cache-Control': 'no-cache', 'Accept-Encoding': 'identity' }, undefined, options.signal);
       check();
       if (![200, 404].includes(response.status)) throw Error(`WebDAV 读取失败 HTTP ${response.status}；本机记录已保留`);
       let remote = null, tag = '';
@@ -1261,7 +1271,10 @@
   }
   // Render only our own fixed templates without an HTML injection sink. This also works
   // on pages enforcing Trusted Types; no permissive policy or page-global API is created.
+  const renderedMarkup = new WeakMap();
   function renderMarkup(target, markup, doc = document) {
+    const prior = renderedMarkup.get(target);
+    if (prior?.markup === markup && prior.nodes.length === target.childNodes.length && prior.nodes.every((node, index) => node === target.childNodes[index])) return;
     const decode = text => text.replace(/&(?:amp|lt|gt|quot|#39|#x[0-9a-f]+|#[0-9]+);/gi, v => {
       const named = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
       if (own(named, v)) return named[v];
@@ -1287,6 +1300,7 @@
       } else parent.appendChild(doc.createTextNode(decode(token)));
     }
     target.replaceChildren(fragment);
+    renderedMarkup.set(target, { markup, nodes: Array.from(target.childNodes) });
   }
   function hoverPosition(rect, width, height, viewportWidth, viewportHeight) {
     // The observed native shortcut tooltip is below the Pro button. Prefer
@@ -1774,7 +1788,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     const syncDiagnosticText = () => {
       const manager = typeof GM_info === 'object' && GM_info.scriptHandler === 'Tampermonkey' ? 'Tampermonkey' : '未知管理器';
       const version = typeof GM_info === 'object' && /^[0-9.]{1,24}$/.test(String(GM_info.version || '')) ? String(GM_info.version) : '未知';
-      return [`请求诊断：${manager} ${version}；仅本页内存，刷新后清空`, ...syncDiagnostics.map(row => `${new Date(row.startedAt).toISOString()} ${row.method} HTTP ${row.status || '未取得'}；${row.elapsedMs}ms；流开始 ${row.streamStarted ? '是' : '否'}，流结束 ${row.streamEOF ? '是' : '否'}，最终回调 ${row.finalSeen ? '是' : '否'}；${row.outcome === 'completed' ? '请求完成' : '请求失败'}`), ...(syncDiagnostics.length ? [] : ['本页尚无完成的 WebDAV 请求诊断。'])].join('\n');
+      return [`请求诊断：${manager} ${version}；仅本页内存，刷新后清空`, ...syncDiagnostics.map(row => `${new Date(row.startedAt).toISOString()} ${row.method} HTTP ${row.status || '未取得'}；${row.elapsedMs}ms；流开始 ${row.streamStarted ? '是' : '否'}，流结束 ${[204, 205].includes(row.status) ? '无需正文' : row.streamEOF ? '是' : '否'}，最终回调 ${row.finalSeen ? '是' : '否'}；${row.outcome === 'completed' ? '请求完成' : '请求失败'}`), ...(syncDiagnostics.length ? [] : ['本页尚无完成的 WebDAV 请求诊断。'])].join('\n');
     };
     const showStorageText = () => storageSummary(inspectStorage(), settings, { pending: accountPending(), persistent: hasStorage }) + '\n' + syncDiagnosticText();
     if (diagnostics) diagnostics.inspectStorage = showStorageText;

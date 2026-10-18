@@ -40,6 +40,25 @@ test('v1111: final onload before stream EOF waits for complete bounded body', as
   assert.equal(result.status, 200); assert.equal(result.responseText, '{"ok":true}'); assert.equal(api.etagOf(result), '"final"');
 });
 
+test('v1121: final 204 completes without stream EOF and cancels only the empty response reader', async () => {
+  let sent, cancelled=0, aborted=0;const traces=[];
+  const tx=api.createDavTransport(options=>{sent=options;queueMicrotask(()=>{
+    options.onloadstart({status:0,response:new ReadableStream({cancel(){cancelled++}})});
+    options.onload({status:204,finalUrl:options.url,responseHeaders:''});
+  });return {abort(){aborted++}};},manager,100,entry=>traces.push(entry));
+  const result=await tx(config,'PUT',{'If-Match':'"exact"'},'{}');
+  assert.equal(result.status,204);assert.equal(result.responseText,'');await flush();
+  assert.equal(cancelled,1);assert.equal(aborted,0);assert.equal(traces.length,1);assert.equal(traces[0].outcome,'completed');
+  sent.onerror();sent.ontimeout();assert.equal(traces.length,1);
+});
+
+test('v1121: start-only 204 still needs final callback and redirect rejection precedes bodyless completion', async () => {
+  const h=harness('PUT',15);h.start('',{status:204},false);
+  await assert.rejects(h.pending,/超时/);
+  const redirect=harness('PUT');redirect.start('',{},false);redirect.load(204,{finalUrl:'https://other.invalid/'});
+  await assert.rejects(redirect.pending,/重定向/);
+});
+
 test('v1111: EOF before onload uses final metadata and never the starting ETag', async () => {
   const h = harness('GET'); h.start('{}', { status: 200, responseHeaders: 'ETag: "stale"' }); await flush();
   assert.equal(h.settled, false); h.load(200, { responseHeaders: 'ETag: "new"', statusText: 'OK' });

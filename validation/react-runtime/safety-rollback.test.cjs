@@ -25,7 +25,7 @@ function setup(saved) {
   w.GM_getValue=(key,fallback)=>store.has(key)?store.get(key):fallback;
   w.GM_setValue=(key,value)=>{writes.push(key);store.set(key,value)};
   w.GM_listValues=()=>[...store.keys()];w.GM_registerMenuCommand=(name,fn)=>menus.push({name,fn});
-  w.GM_info={scriptHandler:'Tampermonkey',script:{version:'1.1.20'}};
+  w.GM_info={scriptHandler:'Tampermonkey',script:{version:'1.1.21'}};
   w.unsafeWindow=w;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});w.alert=text=>alerts.push(text);
   w.eval(source);
   return {w,store,before,writes,menus,added,scans,requests,errors,shadowRoots,alerts,nativeCall,originalMain,answer,get clones(){return clones},get assignments(){return assignments},close(){for(const observer of observers)observer.disconnect();dom.window.close()}};
