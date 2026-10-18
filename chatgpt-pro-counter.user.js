@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.22
+// @version      1.1.23
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -14,6 +14,7 @@
 // @grant        unsafeWindow
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_deleteValue
 // @grant        GM_listValues
 // @grant        GM_xmlhttpRequest
 // @grant        GM_info
@@ -32,7 +33,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: "1.1.22", phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: "1.1.23", phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null, inspectStorage: null, inspectMessageInfo: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -88,6 +89,8 @@
   const MAX_STREAM = 256 * 1024;
   const MAX_IMPORT = 5 * 1024 * 1024;
   const MAX_EVENTS = 20000;
+  const RETAIN_EVENTS = 1000;
+  const eventOrder = (a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const STATES = new Set(['pending', 'accepted', 'failed', 'aborted', 'unknown', 'manual']);
   const OBSERVATIONS = new Set(['pending', 'http', 'metadata', 'done', 'handoff', 'bounded', 'unreadable', 'error', 'manual']);
   const uuid = () => crypto.randomUUID();
@@ -1693,6 +1696,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     const volatile = new Map();
     const gmGet = hasStorage ? GM_getValue : (key, fallback) => volatile.has(key) ? volatile.get(key) : fallback;
     const gmSet = hasStorage ? GM_setValue : (key, value) => volatile.set(key, value);
+    const gmDelete = hasStorage ? key => { if (typeof GM_deleteValue !== 'function') throw Error('缺少记录清理权限'); GM_deleteValue(key); } : key => volatile.delete(key);
     const gmKeys = hasStorage ? GM_listValues : () => [...volatile.keys()];
     let storedSettings = defaultSettings(), settings = storedSettings, records = [], root, host, hoverRoot, hoverHost, activeTrigger, collapsed = true, tab = 'home', notice = '', storageError = hasStorage ? '' : 'Tampermonkey 存储权限未就绪：当前仅临时显示，刷新后不会保留。请检查脚本权限再刷新。', observer;
     let hoverTimer, hoverHideTimer, panelDraft, nativeBindingTimer, panelReturnFocus, lastNativeAnchor, incrementHost, incrementTimer, incrementKey, storageAvailable = hasStorage, uiBound = false, uiReady = false;
@@ -1780,6 +1784,33 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       }
     };
     const inspectStorage = () => inspectLocalStorage({ keys: gmKeys, get: gmGet });
+    let retainingRecords = false;
+    const retentionCutoff = () => {
+      const value = gmGet(`${PREFIX}retention.cutoff`, null);
+      if (value !== null && (!finiteDate(value.at) || !shortId(value.id))) throw Error('记录保留边界读取失败');
+      return value;
+    };
+    const expiredRecord = (event, cutoff) => !!cutoff && eventOrder(event, cutoff) <= 0;
+    function retainRecords() {
+      if (retainingRecords || !storageAvailable) return;
+      retainingRecords = true;
+      try {
+        let cutoff = retentionCutoff();
+        const active = records.filter(event => !expiredRecord(event, cutoff)).sort((a, b) => eventOrder(b, a));
+        if (active.length > RETAIN_EVENTS) {
+          backup('保留最新 1000 条前');
+          if (!storageAvailable) throw Error('存储读取不完整');
+          cutoff = { at: active[RETAIN_EVENTS].at, id: active[RETAIN_EVENTS].id };
+          verifiedSet(`${PREFIX}retention.cutoff`, cutoff);
+        }
+        for (const event of records.filter(event => expiredRecord(event, cutoff))) {
+          const key = `${PREFIX}event.${event.id}`;
+          gmDelete(key);
+          if (gmGet(key, null) !== null) throw Error('旧记录清理未通过复核');
+        }
+        records = records.filter(event => !expiredRecord(event, cutoff));
+      } finally { retainingRecords = false; }
+    }
     let dataInspection = null;
     const syncDiagnostics = [];
     const syncDiagnosticText = () => {
@@ -1807,7 +1838,8 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
         const inventory = inspectLocalStorage({ keys: gmKeys, get: gmGet, includeBackups: false });
         if (!completeStorage(inventory)) throw Error('不完整的本机记录读取');
         const nextIds = new Set(inventory.records.map(e => e.id));
-        if (records.some(e => !nextIds.has(e.id))) throw Error('本机已知记录突然缺失');
+        const cutoff = retentionCutoff();
+        if (records.some(e => !nextIds.has(e.id) && !expiredRecord(e, cutoff))) throw Error('本机已知记录突然缺失');
         let nextSettings = inventory.settings.sort((a, b) => b.updated - a.updated || b.id.localeCompare(a.id))[0];
         if (!nextSettings) {
           nextSettings = { ...storedSettings, id: 'initial', updated: 0 };
@@ -1815,6 +1847,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
           verifiedSet(`${PREFIX}settings.initial`, nextSettings);
         }
         storedSettings = nextSettings; records = inventory.records;
+        retainRecords();
         const hoverChanged = nextHoverMode !== hoverMode; hoverMode = nextHoverMode;
         account.setEnabled(nextAutoAccount); applyAccountLedger();
         if (hoverChanged && uiReady) { refreshHoverPreference(); updateHover(); }
@@ -1822,12 +1855,15 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
         lastKeys = inventory.recordKeys + ':' + inventory.settingsKeys + ':' + records.reduce((n, e) => n + e.updated, 0);
       } catch { storageAvailable = false; if (hasStorage) storageError = '本机存储读取不完整，已保留本页已知记录并暂停同步与修改。请打开“本机数据检查”；不要删除或重装脚本。'; }
     };
-    const save = (event, strict = false) => {
+    const save = (event, strict = false, deferRetention = false) => {
       try {
         if (hasStorage && !storageAvailable) throw Error('存储已暂停');
-        const clean = validEvent(event); verifiedSet(`${PREFIX}event.${clean.id}`, clean);
+        const clean = validEvent(event);
+        if (expiredRecord(clean, retentionCutoff())) return;
+        verifiedSet(`${PREFIX}event.${clean.id}`, clean);
         const index = records.findIndex(e => e.id === clean.id); if (index < 0) records.push(clean); else records[index] = clean;
         rememberCount(clean);
+        if (!deferRetention) retainRecords();
       } catch { storageAvailable = false; storageError = '记录写入未通过复核，已暂停修改和同步。请保留页面并导出已知记录，再检查脚本存储。'; if (strict) throw Error(storageError); }
       scheduleRender();
     };
@@ -1873,11 +1909,12 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
         const inventory = inspectStorage();
         if (!completeStorage(inventory) || inventory.readErrors || inventory.invalidBackups) throw Error('备份读取不完整');
         const data = exportObject(), ids = new Set(data.events.map(e => e.id));
-        // Keep every older backup containing history absent from this snapshot.
-        // Never replace a nonempty recovery copy with an empty snapshot.
+        // Protect missing history unless explicitly aged out by retention.
+        // Backup snapshots themselves are not truncated.
         const occupied = new Set(inventory.backups.map(b => b.key));
         let key = Array.from({ length: 12 }, (_, n) => `${PREFIX}backup.${n}`).find(k => !occupied.has(k));
-        if (!key) key = inventory.backups.filter(b => b.valid && b.snapshot.events.every(e => ids.has(e.id))).sort((a, b) => a.exportedAt.localeCompare(b.exportedAt))[0]?.key;
+        const cutoff = retentionCutoff();
+        if (!key) key = inventory.backups.filter(b => b.valid && b.snapshot.events.every(e => ids.has(e.id) || expiredRecord(e, cutoff))).sort((a, b) => a.exportedAt.localeCompare(b.exportedAt))[0]?.key;
         if (!key) throw Error('现有备份包含缺失历史');
         verifiedSet(key, { ...data, reason });
       } catch { throw Error('安全备份未通过复核，已取消后续修改；请先导出并检查本机数据。'); }
@@ -1950,7 +1987,7 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
       } else if (tab === 'log') {
         const proof = pow.current();
         const powStatus = `<div id="pow-status" class="callout" role="status">PoW 难度：${proof ? `<span class="pow-difficulty" title="是否要求：${proof.required === null ? '未知' : proof.required ? '是' : '否'}">${esc(proof.difficulty)}</span> · 最近捕获 ${fmt(proof.observedAt)}` : '暂未捕获'}</div>`;
-        const rows = (accountPending() ? [...new Set(records.filter(event => event.ledger.startsWith('unassigned:')).map(event => event.ledger))].flatMap(ledger => grouped(records, ledger)).sort((a, b) => b.at - a.at) : grouped(records, settings.ledger)).slice(0, 80);
+        const rows = (accountPending() ? [...new Set(records.filter(event => event.ledger.startsWith('unassigned:')).map(event => event.ledger))].flatMap(ledger => grouped(records, ledger)).sort((a, b) => b.at - a.at) : grouped(records, settings.ledger)).slice(0, RETAIN_EVENTS);
         body = `${powStatus}<div class="actions">${button('storage', '所有账本与备份')}</div><div class="row"><span class="eyebrow">${esc(settings.label)} · 最近 ${rows.length} 条</span>${button('export', '导出', 'ghost')}</div><ul class="log" tabindex="0" aria-label="计数记录">${rows.length ? rows.map(e => `<li><div class="row"><strong class="badge ${e.state === 'failed' || e.state === 'aborted' ? 'warning' : ''}">${esc(status(e))}</strong><small>${fmt(e.at)}</small></div>${e.state === 'manual' ? '' : `<div class="model muted">请求：${esc(e.requested || '未知')}<br>响应路由：${esc(e.conflict ? '字段冲突' : e.route || '未取得')}${e.label ? `<br>回答标签：${esc(e.label)}` : ''}</div><small>${e.observation === 'handoff' ? '响应已转交其他通道；未监听 WebSocket' : e.observation === 'bounded' ? '达到观察上限；后续状态未知' : e.observation === 'unreadable' ? '未解析到响应元数据' : e.observation === 'http' ? '仅确认 HTTP 接收' : ''}${!e.stable ? ' · 缺少稳定 ID，重试可能重复' : ''}${e.attempts > 1 ? ` · ${e.attempts} 次尝试已合并` : ''}</small>`}</li>`).join('') : '<li class="empty">还没有记录<br><small>打开历史对话不会增加计数</small></li>'}</ul><div class="foot">已接收 ≠ 官方扣额。HTTP 失败/取消不计入，但也不能证明平台未扣额；可手动校准。</div>`;
       } else {
         body = `<div class="eyebrow">${settings.mode === 'fixed' ? '本周期' : '最近七天'}已用 · 本机估算</div><div class="number">${!storageAvailable ? '待核对' : accountPending() ? '待识别' : total.used}<span> / ${settings.cap}</span></div><div class="meter" role="progressbar" aria-label="本机估算已用" aria-valuemin="0" aria-valuemax="${Math.max(total.used, settings.cap)}" aria-valuenow="${accountPending() ? 0 : total.used}"><div class="fill" style="width:${accountPending() ? 0 : Math.min(100, total.used / settings.cap * 100)}%"></div></div><div class="row"><strong>估算剩余 ${!storageAvailable ? '待核对' : accountPending() ? '待识别' : total.remaining}</strong><span class="meta">待确认 ${total.pending} · 失败/取消 ${total.failed}</span></div><div class="callout">${settings.mode === 'fixed' ? `下个周期：${fmt(total.next)}<br>锚点由你设置，不是服务端重置时间。` : '每条记录在 168 小时后移出统计窗口。'}${total.raw < 0 ? '<br><span class="warning">校准合计为负，已用暂显示 0，请复核记录。</span>' : ''}</div><div class="meta">已接收 Pro ${!storageAvailable ? '待核对' : accountPending() ? '待识别' : total.pro} · 手动校准 ${total.adjustment >= 0 ? '+' : ''}${total.adjustment}</div><div class="actions calibration" role="group" aria-label="手动校准">${button('plus', '+1 校正')}${button('minus', '−1 校正')}${button('settings', '初始用量 / 设置', 'initial')}</div><div class="actions secondary">${button('export', '导出')}${button('import', '导入合并')}${button('backup', '最近备份', 'ghost')}${button('storage', '本机数据检查', 'ghost')}</div><div class="foot">本机优先 · ${getDav().enabled ? 'WebDAV 已配置' : 'WebDAV 未启用'} · 非官方余额<br>${esc(settings.label)} · ${observer?.healthy() ? (observer.observed() ? '观察器已捕获请求' : '观察器已安装，等待新请求') : '观察器可能被覆盖，请刷新页面'}${account.enabled() ? '<br>按登录用户分账；上限与周期设置共用。' : ''}${getDav().enabled ? `<br>${esc(syncStatus)}${Math.max(settings.updated, ...records.map(e => e.updated)) > Number(gmGet(`${PREFIX}lastSync`, 0)) ? '<br>有待同步的新记录；断网时保留在本机。' : ''}` : ''}</div>`;
@@ -2054,10 +2091,11 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
           if (file.size > MAX_IMPORT) throw Error('文件过大，最多 5 MB');
           const data = decodeImport(await file.text());
           if (!win.confirm(`将合并 ${data.events.length} 条记录（已有记录按 ID 去重），保留本机设置。导入前会自动备份。继续？`)) return;
-          backup('导入前'); const before = records.length;
-          const merged = mergeEvents(records, data.events);
-          for (const ev of merged) { const previous = records.find(x => x.id === ev.id); if (!previous || JSON.stringify(previous) !== JSON.stringify(ev)) save(ev, true); }
-          notice = `合并完成：新增 ${records.length - before} 条；设置保留不变。请确认两端周期、上限和账本相同。`; render();
+          backup('导入前');
+          const merged = mergeEvents(records, data.events).sort((a, b) => eventOrder(b, a)).slice(0, RETAIN_EVENTS);
+          for (const ev of merged) { const previous = records.find(x => x.id === ev.id); if (!previous || JSON.stringify(previous) !== JSON.stringify(ev)) save(ev, true, true); }
+          retainRecords();
+          notice = `合并完成：当前保留 ${records.length} 条（最多 1000 条）；设置保留不变。请确认两端周期、上限和账本相同。`; render();
         } catch (error) { notice = `导入未完成：${error.message}`; render(); }
       });
     }
@@ -2112,7 +2150,9 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
           local: () => { load(); return syncObject(); }, backup: () => backup('同步前'),
           apply: merged => {
             load();
-            for (const ev of mergeEvents(records, merged.events.filter(event => !event.ledger.startsWith('unassigned:')))) { const previous = records.find(x => x.id === ev.id); if (!previous || JSON.stringify(previous) !== JSON.stringify(ev)) save(ev, true); }
+            const retained = mergeEvents(records, merged.events.filter(event => !event.ledger.startsWith('unassigned:'))).sort((a, b) => eventOrder(b, a)).slice(0, RETAIN_EVENTS);
+            for (const ev of retained) { const previous = records.find(x => x.id === ev.id); if (!previous || JSON.stringify(previous) !== JSON.stringify(ev)) save(ev, true, true); }
+            retainRecords();
             const latest = newestSettings(storedSettings, merged.settings); verifiedSet(`${PREFIX}settings.${latest.id}`, latest); storedSettings = latest; applyAccountLedger();
           } }, { signal: currentAbort.signal, check: sameDestination });
         syncStatus = `同步成功 ${fmt(Date.now())} · 合并 ${result.count} 条记录`;
