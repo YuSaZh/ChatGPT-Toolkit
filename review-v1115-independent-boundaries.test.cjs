@@ -9,6 +9,7 @@ function remountOldSources(s) {
     const fresh = s.doc.createElement('div');
     c.element.parentNode.appendChild(fresh);
     c.element.remove(); c.element = fresh; c.host.stateNode = fresh;
+    fresh.setAttribute(c.role==='user'?'data-user-message-bubble':'data-message-author-role',c.role==='user'?'':c.role);
     Object.defineProperty(fresh, '__reactFiber$independent', { value: c.host });
     c.fiber.memoizedProps = { ...c.props };
   }
@@ -44,11 +45,11 @@ test('independent: disabled display does not inspect current item trees', () => 
   assert.equal(s.state.nativeReader(s.doc).targets().length, 0);
 });
 
-test('independent: anchor fallback is tested without even a main tag', () => {
+test('independent: missing anchors do not trigger a generic page scan', () => {
   const s = setup({ noAnchor: true });
   s.mainHost.stateNode.tagName = 'SECTION';
   assert.equal(s.doc.querySelectorAll('main,[data-turn-key],[data-user-message-bubble],[data-chatgpt-conversation-selection-target],[data-app-action-timeline-scroll]').length, 0);
-  s.render(); assert.equal(s.badges.size, 2);
+  s.render(); assert.equal(s.badges.size, 0);
 });
 
 test('independent: query fallback cannot reveal a previously unselected pre-auth snapshot', () => {

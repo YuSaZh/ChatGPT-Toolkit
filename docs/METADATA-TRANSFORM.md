@@ -1,9 +1,14 @@
 # Metadata factory transformer
 
-Production status (1.1.20): this legacy transformer and its page runtime remain
+Production status (1.1.24): this legacy transformer and its page runtime remain
 dormant. The userscript reads committed native snapshots and appends its own
 inline span after the native action buttons, following commit. It does not install the factory, component or Function.call
 wrappers described below. These files remain for reproducible regression tests.
+
+The native reader now resolves only DOM message-anchor paths against the
+committed root, sharing edge/property checks and hook snapshots within a pass.
+It does not traverse the whole application tree. Conversation changes drive
+updates; idle housekeeping and unrelated DOM/style changes do not scan labels.
 
 `module-metadata-transform.cjs` is an independently implemented, MIT-licensed
 source transformer. It parses a factory without evaluating it or calling any

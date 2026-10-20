@@ -30,6 +30,7 @@ function setup({ internal='local-a', browser='chat-a', mapping=null, query=true,
   for(const [id,role] of [['question','user'],['answer','assistant']]) {
     const element=doc.createElement('div');turn.appendChild(element);
     if(!noAnchor&&role==='user')element.setAttribute('data-user-message-bubble','');
+    if(!noAnchor&&role==='assistant')element.setAttribute('data-message-author-role','assistant');
     const item={type:role+'-message',messageId:id};
     Object.defineProperty(item,'content',{get(){throw Error('item content read');}});
     const props={conversationId:direct?browser:internal,[role==='assistant'?'assistantItem':'item']:item};

@@ -24,6 +24,9 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function setup(depth) {
   const dom = new JSDOM('<html><head></head><body><div id="app"></div></body></html>', { url: 'https://chatgpt.com/c/chat-a', runScripts: 'dangerously', pretendToBeVisual: true });
   const w = dom.window, roots = [], menus = [], writes = [], errors = [], observers = [], store = new Map();
+  let scans=0;const intervals=[];
+  const queryAll=w.Document.prototype.querySelectorAll;w.Document.prototype.querySelectorAll=function(selector){if(selector.includes('button[data-testid="copy-turn-action-button"]'))scans++;return Reflect.apply(queryAll,this,[selector])};
+  const interval=w.setInterval;w.setInterval=function(fn,delay){intervals.push({fn,delay});return Reflect.apply(interval,this,arguments)};
   const NativeObserver=w.MutationObserver;w.MutationObserver=class extends NativeObserver{constructor(callback){super(callback);observers.push(this)}};
   const settings = {v:1,id:'existing',updated:1770000000000,cap:200,mode:'fixed',anchor:1770000000000,ledger:'default',label:'Existing ledger'};
   store.set('gpc.v1.settings.existing', settings); store.set('gpc.v1.ui.messageInfo', true);
@@ -40,7 +43,7 @@ async function setup(depth) {
   const nativeCall=w.Function.prototype.call;w.installToolkit=()=>w.eval(source);w.eval(bundle);await wait(380);
   const labels=()=>[...w.document.querySelectorAll('.chatgpt-toolkit-message-info')];
   const refresh=()=>menus.find(m=>m.name==='诊断 Pro 计数器').fn();
-  return {w,dom,roots,menus,writes,store,beforeStore,errors,nativeCall,labels,refresh,get requests(){return requests},close(){for(const observer of observers)observer.disconnect();w.nativeRoot?.unmount();dom.window.close()}};
+  return {w,dom,roots,menus,writes,store,beforeStore,errors,nativeCall,labels,refresh,intervals,get scans(){return scans},get requests(){return requests},close(){for(const observer of observers)observer.disconnect();w.nativeRoot?.unmount();dom.window.close()}};
 }
 for (const depth of [12, 320]) test(`passive inline preserves SSR/useId/native action slot at depth ${depth}`, async () => {
   const e = await setup(depth);
@@ -57,4 +60,21 @@ for (const depth of [12, 320]) test(`passive inline preserves SSR/useId/native a
     ui.querySelector('#message-info-on').click();await wait(250);assert.equal(e.labels().length,2);assert.equal(e.requests,0);assert.deepEqual(e.errors,[]);assert.equal(e.w.fixture.inspect().recoveries.length,0);
     await e.w.fetch('/api/auth/session');assert.equal(e.labels().length,0,'account boundary clears display before the native response');await wait(260);assert.equal(e.labels().length,0,'same cached mapping cannot return after account invalidation');assert.equal(e.requests,1);
   } finally {e.close()}
+});
+
+test('message refresh ignores unrelated mutations, idle housekeeping and disabled display', async () => {
+  const e=await setup(320);
+  try {
+    assert.equal(e.labels().length,2);await wait(250);const before=e.scans;
+    const aside=e.w.document.createElement('aside');e.w.document.body.appendChild(aside);
+    const input=e.w.document.createElement('div');input.setAttribute('contenteditable','true');e.w.document.querySelector('main').appendChild(input);
+    await wait(250);const settled=e.scans;
+    for(let i=0;i<50;i++){aside.textContent=String(i);input.textContent=String(i);e.w.document.querySelector('main').style.opacity=String(i%2?1:.99)}
+    e.intervals.find(x=>x.delay===5000).fn();await wait(300);
+    assert.equal(e.scans,settled,'typing, sidebar, styles and housekeeping do not scan messages');
+    assert.ok(before>0);e.menus.find(m=>m.name==='显示 Pro 计数器').fn();
+    const ui=e.roots.find(r=>r.host.id==='chatgpt-pro-local-counter');ui.querySelector('[data-action="settings"]').click();ui.querySelector('#message-info-off').click();await wait(250);
+    const off=e.scans;e.w.fixture.update('hidden-update');e.intervals.find(x=>x.delay===5000).fn();await wait(300);
+    assert.equal(e.scans,off);assert.equal(e.labels().length,0);assert.equal(e.requests,0);
+  }finally{e.close()}
 });

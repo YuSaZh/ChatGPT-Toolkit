@@ -41,13 +41,13 @@ test('committed index: unrelated earlier React root cannot hide conversation roo
   const root = { tag: 3, return: null }; root.stateNode = { current: root };
   const host = { tag: 5, stateNode: widget, return: root }; root.child = host;
   Object.defineProperty(widget, '__reactFiber$widget', { value: host });
-  const index = api.createCommittedMessageIndex(s.doc); assert.equal(index.roots, 2);
+  const index = api.createCommittedMessageIndex(s.doc); assert.equal(index.roots, 1, 'unrelated widget root is never indexed');
   s.render(); assert.equal(s.badges.size, 2);
 });
-test('committed index: non-React main does not disable generic container discovery', () => {
+test('committed index: missing message anchors omit labels without a whole-page fallback', () => {
   const s = setup({ noAnchor: true }); s.mainHost.stateNode.tagName = 'SECTION';
   s.doc.body.appendChild(s.doc.createElement('main'));
-  s.render(); assert.equal(s.badges.size, 2);
+  s.render(); assert.equal(s.badges.size, 0);
 });
 test('committed index: hidden committed subtree cannot borrow stale visible parent chain', () => {
   const s = setup(), next = bailout(s);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Toolkit
 // @namespace    local.chatgpt.pro-counter
-// @version      1.1.23
+// @version      1.1.24
 // @homepageURL  https://github.com/YuSaZh/ChatGPT-Toolkit
 // @supportURL   https://github.com/YuSaZh/ChatGPT-Toolkit/issues
 // @updateURL    https://raw.githubusercontent.com/YuSaZh/ChatGPT-Toolkit/main/chatgpt-pro-counter.user.js
@@ -33,7 +33,7 @@
   const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   let diagnostics;
   if (browser) {
-    const state = { version: "1.1.23", phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
+    const state = { version: "1.1.24", phase: 'entry', frame: 'unchecked', storage: 'unchecked', ui: 'not-started', observer: 'not-started', menu: 'unavailable', hoverListeners: 'not-started', hoverEvent: 'none', hoverMatch: 'unchecked', hoverScope: 'unchecked', hoverCard: 'hidden', hoverPaint: 'unchecked', hoverEditors: 0, hoverMarkers: 0, hoverSends: 0, errors: [] };
     diagnostics = {
       state, open: null, inspectHover: null, inspectStorage: null, inspectMessageInfo: null,
       mark(phase, details = {}) { Object.assign(state, details, { phase }); },
@@ -637,68 +637,95 @@
     }
     return [];
   }
-  // React bailouts may reuse a child list without rewriting each child's return
-  // pointer. Return links can locate the root, but cannot prove current ancestry.
-  // Build canonical parent links by walking root.current forward exactly once.
+  const messageAnchorSelector = '[data-message-id],[data-user-message-bubble],[data-message-author-role],button[data-testid="copy-turn-action-button"],button[data-testid="copy-turn-action"],button[data-testid="copy-message-button"],button[aria-label="Copy"],button[aria-label="Copy response"],button[aria-label="Copy message"],button[aria-label="复制"],button[aria-label="复制回复"],button[aria-label="复制消息"],button[aria-label="複製"],button[aria-label="複製回覆"],button[aria-label="複製訊息"]';
+  // Prove only message-host paths against root.current. React bailouts can leave
+  // a child's return pointing to the alternate parent, so check both parents'
+  // child lists. Cache shared edges for this pass; never walk unrelated subtrees.
   function createCommittedMessageIndex(doc) {
-    const parents = new WeakMap(), hosts = new WeakMap(), members = new WeakSet(), fibers = [];
-    const anchors = '[data-message-id],[data-turn-key],[data-user-message-bubble],[data-content-search-turn-key],[data-chatgpt-conversation-selection-target],[data-app-action-timeline-scroll],main';
-    const marked = Array.from(doc.querySelectorAll(anchors)).slice(-600);
-    // The page can mount independent React roots. A widget's root must not hide
-    // the conversation root, and a non-React <main> must not disable fallback.
-    const seeds = [...new Set([...marked, ...Array.from(doc.querySelectorAll('div,article,section')).slice(0,1500)])];
-    const roots = new Set(), located = new WeakMap();
-    let attachedCount = 0;
-    for (const element of seeds) {
+    const parents = new WeakMap(), hosts = new WeakMap(), members = new WeakSet(), fibers = [], paths = [];
+    const properties = new WeakMap(), children = new WeakMap(), resolved = new WeakMap(), visiting = new WeakSet(), roots = new Set();
+    const get = (object, key) => {
+      if (!object || typeof object !== 'object') return undefined;
+      let values = properties.get(object); if (!values) { values = new Map(); properties.set(object, values); }
+      if (!values.has(key)) values.set(key, dataProperty(object, key));
+      return values.get(key);
+    };
+    const marked = Array.from(doc.querySelectorAll(messageAnchorSelector)).slice(-600);
+    let steps = 0, attachedCount = 0;
+    function linked(parent, node) {
+      if (!parent || typeof parent !== 'object') return false;
+      let list = children.get(parent);
+      if (!list) {
+        list = new Set(); children.set(parent, list);
+        for (let child = get(parent, 'child'); child && typeof child === 'object' && !list.has(child); child = get(child, 'sibling')) {
+          if (++steps > 24000) return false;
+          list.add(child);
+        }
+      }
+      return steps <= 24000 && list.has(node);
+    }
+    function prove(start) {
+      if (!start || typeof start !== 'object') return false;
+      const stack = [{ node: start, candidates: null, next: 0 }];
+      const finish = valid => { const { node } = stack.pop(); visiting.delete(node); resolved.set(node, valid); };
+      while (stack.length) {
+        const frame = stack.at(-1), node = frame.node;
+        if (resolved.has(node)) { stack.pop(); continue; }
+        if (stack.length > 1024 || steps > 24000) { finish(false); continue; }
+        if (!frame.candidates) {
+          visiting.add(node);
+          if (get(node, 'tag') === 3) {
+            const valid = get(get(node, 'stateNode'), 'current') === node;
+            if (valid) { roots.add(node); parents.set(node, null); }
+            finish(valid); continue;
+          }
+          const parent = get(node, 'return');
+          frame.candidates = [parent, get(parent, 'alternate')];
+        }
+        if (frame.next >= frame.candidates.length) { finish(false); continue; }
+        const candidate = frame.candidates[frame.next];
+        if (!linked(candidate, node) || visiting.has(candidate)) { frame.next++; continue; }
+        if (resolved.has(candidate)) {
+          if (resolved.get(candidate)) { parents.set(node, candidate); finish(true); }
+          else frame.next++;
+        } else stack.push({ node: candidate, candidates: null, next: 0 });
+      }
+      return resolved.get(start) === true;
+    }
+    function chain(element) {
+      const result = [];
+      for (let node = hosts.get(element); node && result.length <= 1024; node = parents.get(node)) {
+        const props = get(node, 'memoizedProps');
+        if (([22,23].includes(get(node, 'tag')) && get(node, 'memoizedState') != null) || get(props, 'mode') === 'hidden') return [];
+        result.push(node);
+      }
+      return roots.has(result.at(-1)) ? result : [];
+    }
+    for (const element of marked) {
       let attached;
       try {
         const keys = Object.getOwnPropertyNames(element);
         if (keys.length > 200) continue;
-        const key = keys.find(key => key.startsWith('__reactFiber$') || key.startsWith('__reactContainer$'));
-        attached = key && dataProperty(element, key);
+        const key = keys.find(key => key.startsWith('__reactFiber$'));
+        attached = key && get(element, key);
       } catch { continue; }
       if (!attached || typeof attached !== 'object') continue;
       attachedCount++;
-      const seen = new Set(), path = [];
-      let current = null;
-      for (let node = attached, depth = 0; node && typeof node === 'object' && depth < 1024 && !seen.has(node); node = dataProperty(node, 'return'), depth++) {
-        if (located.has(node)) { current = located.get(node); break; }
-        seen.add(node); path.push(node);
-        const root = dataProperty(node, 'stateNode'), candidate = dataProperty(root, 'current');
-        if (dataProperty(node, 'tag') === 3 && candidate && dataProperty(candidate, 'stateNode') === root) { current = candidate; break; }
+      for (const node of [attached, get(attached, 'alternate')]) {
+        if (prove(node)) { hosts.set(element, node); break; }
       }
-      // An unresolved truncated path may be resolved from a shallower host later.
-      if (current) { for (const node of path) located.set(node, current); roots.add(current); }
-      if (roots.size >= 24) break;
-    }
-    const stack = [...roots].reverse().map(fiber => ({ fiber, parent: null, depth: 0 }));
-    let steps = 0;
-    while (stack.length && ++steps <= 24000) {
-      const { fiber, parent, depth } = stack.pop();
-      if (!fiber || typeof fiber !== 'object' || members.has(fiber) || depth > 1024) continue;
-      members.add(fiber); parents.set(fiber, parent); fibers.push(fiber);
-      const sibling = dataProperty(fiber, 'sibling'); if (sibling && parent) stack.push({ fiber: sibling, parent, depth });
-      const props = dataProperty(fiber, 'memoizedProps'), tag = dataProperty(fiber, 'tag');
-      if (([22,23].includes(tag) && dataProperty(fiber, 'memoizedState') != null) || dataProperty(props, 'mode') === 'hidden') continue;
-      const element = dataProperty(fiber, 'stateNode');
-      if (tag === 5 && element?.nodeType === 1 && element.isConnected) hosts.set(element, fiber);
-      const child = dataProperty(fiber, 'child'); if (child) stack.push({ fiber: child, parent: fiber, depth: depth + 1 });
+      const path = chain(element);
+      if (!path.length) continue;
+      paths.push(path);
+      for (const fiber of path) {
+        if (!members.has(fiber)) { members.add(fiber); fibers.push(fiber); }
+        const host = get(fiber, 'stateNode');
+        if (get(fiber, 'tag') === 5 && host?.nodeType === 1 && host.isConnected) hosts.set(host, fiber);
+      }
     }
     return {
       count: fibers.length, anchors: marked.length, attached: attachedCount, roots: roots.size,
-      has: fiber => members.has(fiber),
-      boundaries(conversation) {
-        const found = fibers.filter(fiber => {
-          const props = dataProperty(fiber, 'memoizedProps');
-          return Array.isArray(dataProperty(props, 'renderedTurns')) && (!conversation || [dataProperty(props, 'conversationId'), dataProperty(props, 'browserConversationId')].includes(conversation));
-        });
-        return found.length ? found : [...roots];
-      },
-      chain(element) {
-        const chain = [];
-        for (let fiber = hosts.get(element); fiber && chain.length <= 1024; fiber = parents.get(fiber)) chain.push(fiber);
-        return roots.has(chain.at(-1)) ? chain : [];
-      }
+      has: fiber => members.has(fiber), paths, get, chain
     };
   }
   // The current frontend renders item/assistantItem components rather than the
@@ -706,57 +733,36 @@
   // materialized React store snapshots. No getSnapshot, scope.get, watch,
   // component, module factory, signal or other application function is called.
   function currentItemTargets(doc, conversation = '', index = createCommittedMessageIndex(doc)) {
-    const roots = new Set(index.boundaries(conversation)), targets = new Map();
-    const hidden = fiber => ([22,23].includes(dataProperty(fiber, 'tag')) && dataProperty(fiber, 'memoizedState') != null) || dataProperty(dataProperty(fiber, 'memoizedProps'), 'mode') === 'hidden';
-    function hostOf(component, id, role) {
-      const stack = [dataProperty(component, 'child')], seen = new Set();
-      let count = 0;
-      while (stack.length && ++count <= 300) {
-        const fiber = stack.pop();
-        if (!fiber || typeof fiber !== 'object' || seen.has(fiber) || !index.has(fiber)) continue;
+    const targets = new Map(), seen = new Set(), get = index.get;
+    for (const path of index.paths) {
+      let element = null, nestedIdentity = '';
+      for (const fiber of path) {
+        const host = get(fiber, 'stateNode');
+        if (get(fiber, 'tag') === 5 && host?.nodeType === 1 && host.isConnected && ['DIV','ARTICLE','SECTION','LI','P','SPAN'].includes(host.tagName)) element = host;
+        const props = get(fiber, 'memoizedProps');
+        const assistant = get(props, 'assistantItem'), item = assistant || get(props, 'item');
+        const type = get(item, 'type');
+        if (!['user-message','assistant-message'].includes(type)) continue;
+        const role = type === 'user-message' ? 'user' : 'assistant';
+        if (assistant && role !== 'assistant') continue;
+        // Match the actual returned action-row identity before the item's fallback.
+        const rendered = assistant ? get(get(get(fiber, 'child'), 'memoizedProps'), 'messageId') : '';
+        const id = shortId(rendered) || shortId(get(item, 'latestMessageId')) || (role === 'user' ? shortId(get(item, 'serverMessageId')) : '') || shortId(get(item, 'messageId'));
+        const conversation = shortId(get(props, 'conversationId'));
+        if (!id || !conversation) continue;
+        const identity = [conversation, id, role].join('\0');
+        if (nestedIdentity && nestedIdentity !== identity) continue;
+        nestedIdentity = identity;
+        if (seen.has(fiber)) continue;
         seen.add(fiber);
-        const sibling = dataProperty(fiber, 'sibling'); if (sibling) stack.push(sibling);
-        if (hidden(fiber)) continue;
-        const nestedProps = dataProperty(fiber, 'memoizedProps');
-        const nestedItem = dataProperty(nestedProps, 'item') || dataProperty(nestedProps, 'assistantItem');
-        const nestedType = dataProperty(nestedItem, 'type');
-        if (['user-message','assistant-message'].includes(nestedType)) {
-          const nestedId = shortId(dataProperty(nestedItem, 'latestMessageId')) || (role === 'user' ? shortId(dataProperty(nestedItem, 'serverMessageId')) : '') || shortId(dataProperty(nestedItem, 'messageId'));
-          if (nestedType !== role + '-message' || nestedId !== id) continue;
-        }
-        const element = dataProperty(fiber, 'stateNode');
-        if (dataProperty(fiber, 'tag') === 5 && element?.nodeType === 1 && element.isConnected && ['DIV','ARTICLE','SECTION','LI','P','SPAN'].includes(element.tagName) && !element.closest?.('[hidden],[aria-hidden="true"],[inert],[role="dialog"],[role="menu"],aside,nav,button,a')) return element;
-        const child = dataProperty(fiber, 'child'); if (child) stack.push(child);
+        if (!element || element.closest?.('[hidden],[aria-hidden="true"],[inert],[role="dialog"],[role="menu"],aside,nav,button,a')) continue;
+        const chain = index.chain(element);
+        if (!chain.includes(fiber)) continue;
+        const key = [conversation, id, role].join('\0'), prior = targets.get(key);
+        if (prior && (prior.assistant || !assistant)) continue;
+        targets.set(key, { element, id, role, props, item, chain, conversation, assistant: !!assistant });
+        if (targets.size >= 500) break;
       }
-      return null;
-    }
-    let count = 0;
-    const seen = new Set(), stack = [...roots];
-    while (stack.length && ++count <= 24000) {
-      const fiber = stack.pop();
-      if (!fiber || typeof fiber !== 'object' || seen.has(fiber) || !index.has(fiber)) continue;
-      seen.add(fiber);
-      const sibling = dataProperty(fiber, 'sibling'); if (sibling && !roots.has(fiber)) stack.push(sibling);
-      if (hidden(fiber)) continue;
-      const child = dataProperty(fiber, 'child'); if (child) stack.push(child);
-      const props = dataProperty(fiber, 'memoizedProps');
-      const assistant = dataProperty(props, 'assistantItem'), item = assistant || dataProperty(props, 'item');
-      const type = dataProperty(item, 'type');
-      if (!['user-message','assistant-message'].includes(type)) continue;
-      const role = type === 'user-message' ? 'user' : 'assistant';
-      if (assistant && role !== 'assistant') continue;
-      // Match the actual returned action-row identity before the item's fallback.
-      const rendered = assistant ? dataProperty(dataProperty(child, 'memoizedProps'), 'messageId') : '';
-      const id = shortId(rendered) || shortId(dataProperty(item, 'latestMessageId')) || (role === 'user' ? shortId(dataProperty(item, 'serverMessageId')) : '') || shortId(dataProperty(item, 'messageId'));
-      const conversation = shortId(dataProperty(props, 'conversationId'));
-      if (!id || !conversation) continue;
-      const element = hostOf(fiber, id, role);
-      if (!element) continue;
-      const chain = index.chain(element);
-      if (!chain.includes(fiber)) continue;
-      const key = [conversation, id, role].join('\0'), prior = targets.get(key);
-      if (prior && (prior.assistant || !assistant)) continue;
-      targets.set(key, { element, id, role, props, item, chain, conversation, assistant: !!assistant });
       if (targets.size >= 500) break;
     }
     return [...targets.values()];
@@ -771,7 +777,7 @@
       if (!identities) { identities = new Set(); blockedNodes.set(element, identities); }
       identities.add([id, role].join('\0'));
     }
-    let report = {}, itemTargets = [], index = null;
+    let report = {}, itemTargets = [], index = null, snapshotCandidates = new WeakMap();
     const path = () => { try { return new URL(page()).origin + new URL(page()).pathname; } catch { return ''; } };
     function sources(element) {
       const result = [];
@@ -800,6 +806,7 @@
     }
     return {
       begin(enabled = true) {
+        snapshotCandidates = new WeakMap();
         report = { messageFiberPaths: 0, messagePropSources: 0, messageFenced: 0, messageItemSources: 0, messageStoreSources: 0, messagePage: conversationPage(path()) ? 'conversation' : 'not-conversation', messageCommittedFibers: 0, messageDomAnchors: 0, messageReactHosts: 0, messageReactRoots: 0 };
         index = enabled && conversationPage(path()) ? createCommittedMessageIndex(doc) : null;
         report.messageCommittedFibers = index?.count || 0;
@@ -807,7 +814,7 @@
         itemTargets = enabled && conversationPage(path()) ? currentItemTargets(doc, conversationPage(path()), index) : [];
       },
       targets: () => itemTargets,
-      end() { index = null; itemTargets = itemTargets.map(({ element, id, role }) => ({ element, id, role })); },
+      end() { index = null; snapshotCandidates = new WeakMap(); itemTargets = itemTargets.map(({ element, id, role }) => ({ element, id, role })); },
       report: () => ({ ...report }),
       invalidate() {
         sourceEpoch++;
@@ -821,6 +828,7 @@
         for (const target of itemTargets) fenceNode(target.element, target.id, target.role);
       },
       read(element, id, role, observedConversation = '', target = null) {
+        const get = index?.get || dataProperty;
         const currentPath = path(), conversation = conversationPage(currentPath);
         if (!conversation || !shortId(id) || !['user', 'assistant'].includes(role)) return null;
         if (blockedNodes.get(element)?.has([id, role].join('\0'))) { report.messageFenced = (report.messageFenced || 0) + 1; return null; }
@@ -832,9 +840,9 @@
           // boundary supplies both. Never substitute the URL for missing proof.
           let bound = target.conversation === conversation, conflict = false;
           for (const fiber of target.chain) {
-            const props = dataProperty(fiber, 'memoizedProps');
-            const internal = shortId(dataProperty(props, 'conversationId'));
-            const browser = shortId(dataProperty(props, 'browserConversationId'));
+            const props = get(fiber, 'memoizedProps');
+            const internal = shortId(get(props, 'conversationId'));
+            const browser = shortId(get(props, 'browserConversationId'));
             if (internal === target.conversation && browser) {
               if (browser === conversation) bound = true; else conflict = true;
             }
@@ -859,18 +867,22 @@
           }
           const liveSnapshots = [], querySnapshots = [];
           for (const fiber of target.chain) {
-            let hook = dataProperty(fiber, 'memoizedState'), steps = 0;
+            let candidates = snapshotCandidates.get(fiber);
+            if (candidates) { liveSnapshots.push(...candidates.live); querySnapshots.push(...candidates.query); continue; }
+            candidates = { live: [], query: [] }; snapshotCandidates.set(fiber, candidates);
+            let hook = get(fiber, 'memoizedState'), steps = 0;
             const visited = new Set();
             while (hook && typeof hook === 'object' && ++steps <= 160 && !visited.has(hook)) {
               visited.add(hook);
-              const value = dataProperty(hook, 'memoizedState'), queue = dataProperty(hook, 'queue');
+              const value = get(hook, 'memoizedState'), queue = get(hook, 'queue');
               // React useSyncExternalStore caches the committed snapshot in both
               // locations. Inspect it; do not invoke the snapshot callback.
-              const external = value === dataProperty(queue, 'value') && typeof dataProperty(queue, 'getSnapshot') === 'function';
-              if (external) liveSnapshots.push(value);
-              querySnapshots.push(value, dataProperty(value, 'data'));
-              hook = dataProperty(hook, 'next');
+              const external = value === get(queue, 'value') && typeof get(queue, 'getSnapshot') === 'function';
+              if (external) candidates.live.push(value);
+              candidates.query.push(value, get(value, 'data'));
+              hook = get(hook, 'next');
             }
+            liveSnapshots.push(...candidates.live); querySnapshots.push(...candidates.query);
           }
           // Register every eligible candidate for account fencing, including
           // lower-priority query snapshots that could become visible later.
@@ -915,6 +927,10 @@
   }
   function renderMessageInfo(doc, state, badges, nativeReader, display) {
     state.syncPage();
+    if (!state.enabled()) {
+      display?.clear(); for (const badge of badges.values()) badge.remove(); badges.clear();
+      return { messageEnabled: 'off', messageNodes: 0, messageCached: state.size(), messageNative: 0, messageBadges: 0 };
+    }
     nativeReader ||= state.nativeReader?.(doc);
     nativeReader?.begin(state.enabled());
     const found = new Set(), report = { messageEnabled: state.enabled() ? 'on' : 'off', messageNodes: 0, messageCached: state.size(), messageNative: 0, messageBadges: 0 };
@@ -1726,19 +1742,44 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     // The unsafe module bridge stays dormant. Production only reads already
     // committed native snapshots and appends its own inline spans after commit.
     let messageInfoPreference = true;
-    let messageInfoTimer, messageInfoReadError = false;
+    let messageInfoTimer, messageInfoReadError = false, messageRegion, messageMutationObserver, messageDirtySince = 0, messageViewKey = '';
     const messageBadges = new Map();
     const messageDisplay = createInlineMessageDisplay(document);
     function refreshMessageInfo() {
       if (diagnostics) diagnostics.state.messageInjection = 'disabled-native-snapshots';
-      return renderMessageInfo(document, messageInfoState, messageBadges, undefined, messageDisplay);
+      const report = renderMessageInfo(document, messageInfoState, messageBadges, undefined, messageDisplay);
+      messageViewKey = win.location.pathname + new Date().toDateString();
+      return report;
+    }
+    function bindMessageRegion() {
+      if (!messageInfoState.enabled()) { messageMutationObserver?.disconnect(); messageRegion = null; return; }
+      const next = document.querySelector('main') || document.body;
+      if (!next || next === messageRegion) return;
+      messageMutationObserver?.disconnect(); messageRegion = next;
+      messageMutationObserver ||= new win.MutationObserver(changes => {
+        if (changes.some(change => {
+          if (messageDisplay.owns(change.target)) return false;
+          const target = change.target.nodeType === 1 ? change.target : change.target.parentElement;
+          if (target?.closest?.('aside,nav,header,form,[contenteditable],[role="textbox"],[role="dialog"],[role="menu"],#chatgpt-pro-local-counter,#chatgpt-pro-local-hover')) return false;
+          const nodes = [...(change.addedNodes || []), ...(change.removedNodes || [])];
+          return !nodes.length || !nodes.every(node => messageDisplay.owns(node));
+        })) scheduleMessageInfo();
+      });
+      messageMutationObserver.observe(next, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'inert', 'aria-hidden', 'data-message-id', 'data-message-author-role', 'data-message-model-slug', 'data-turn-key'] });
     }
     function scheduleMessageInfo() {
-      if (messageInfoTimer) return;
+      clearTimeout(messageInfoTimer); messageInfoTimer = null;
+      bindMessageRegion();
+      if (!messageInfoState.enabled()) {
+        messageDirtySince = 0; messageDisplay.clear(); messageBadges.clear(); return;
+      }
+      if (document.hidden) { messageDirtySince = 0; return; }
+      // Coalesce token/DOM bursts; cap latency without polling unchanged pages.
+      const now = Date.now(); messageDirtySince ||= now;
       messageInfoTimer = setTimeout(() => {
-        messageInfoTimer = null;
+        messageInfoTimer = null; messageDirtySince = 0;
         try { const report = refreshMessageInfo(); if (diagnostics) Object.assign(diagnostics.state, report); } catch { /* unsupported page DOM: omit badges */ }
-      }, 200);
+      }, Math.min(200, Math.max(0, 1000 - (now - messageDirtySince))));
     }
     const messageInfoState = createMessageInfoState({ page: () => win.location.href, changed: scheduleMessageInfo, enabled: false });
     messageInfoState.nativeReader(document);
@@ -2525,11 +2566,12 @@ function startPageMetadataBridge(win, doc, { runtimeSource, transformerSource, e
     safeMount(); scheduleMessageInfo();
     win.addEventListener('popstate', () => { messageInfoState.syncPage(); scheduleMessageInfo(); });
     win.addEventListener('pagehide', () => { messageInfoState.invalidate(); messageDisplay.clear(); messageBadges.clear(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { clearTimeout(messageInfoTimer); messageInfoTimer = null; messageDirtySince = 0; } else scheduleMessageInfo(); });
     document.addEventListener('DOMContentLoaded', safeMount, { once: true });
     // React navigation can replace the body or remove our host. Reattach the same roots.
-    try { new MutationObserver(mutations => { if (mutations?.length && mutations.every(change => messageDisplay.owns(change.target))) return; scheduleMessageInfo(); if (quotaPage !== win.location.href) invalidateImageQuota(); if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'class', 'style', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target', 'data-message-id', 'data-message-author-role', 'data-message-model-slug', 'data-turn-key', 'data-user-message-bubble', 'data-content-search-turn-key', 'data-chatgpt-conversation-selection-target', 'data-app-action-timeline-scroll'] }); } catch { /* interval below also recovers */ }
+    try { new MutationObserver(mutations => { if (mutations?.length && mutations.every(change => messageDisplay.owns(change.target))) return; if (quotaPage !== win.location.href) { invalidateImageQuota(); messageInfoState.syncPage(); } if (messageInfoState.enabled() && (!messageRegion?.isConnected || (messageRegion === document.body && document.querySelector('main')))) { bindMessageRegion(); scheduleMessageInfo(); } if (document.body && (!host?.isConnected || !hoverHost?.isConnected)) safeMount(); if (activeTrigger && !nativeTrigger(activeTrigger)) hideHover(); scheduleNativeBindings(); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label', 'aria-hidden', 'data-testid', 'type', 'hidden', 'inert', 'id', 'data-codex-intelligence-trigger', 'data-composer-navigation-target'] }); } catch { /* interval below also recovers */ }
     setInterval(() => {
-      scheduleMessageInfo();
+      if (messageInfoState.enabled() && messageViewKey !== win.location.pathname + new Date().toDateString()) scheduleMessageInfo();
       const mounted = safeMount(); const before = lastKeys, s = settings.id; load();
       if (mounted) { if (before !== lastKeys || s !== settings.id || !document.hidden) render(); }
       bindNativeControls(); if (activeTrigger) updateHover(); else if (quotaPage !== win.location.href || document.hidden) invalidateImageQuota(); positionHover();
