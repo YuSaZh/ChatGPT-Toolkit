@@ -95,3 +95,5 @@ ChatGPT 页面结构和内部字段可能变化；未观察到的请求、App �
 ---
 
 独立 [MIT](LICENSE) 项目。内置 Acorn 保留其 [MIT 许可证](vendor/acorn/LICENSE)。
+
+感谢 [Linux DO](https://linux.do) 社区。

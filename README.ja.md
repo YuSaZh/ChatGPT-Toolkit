@@ -97,3 +97,5 @@ ChatGPT のページ構造や内部フィールドは変更されることがあ
 ---
 
 独立した [MIT](LICENSE) プロジェクトです。同梱の Acorn は、その [MIT ライセンス](vendor/acorn/LICENSE)を保持しています。
+
+[Linux DO](https://linux.do) コミュニティに感謝します。

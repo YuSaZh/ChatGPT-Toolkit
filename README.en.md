@@ -97,3 +97,5 @@ ChatGPT's page structure and internal fields may change. Unobserved requests, ap
 ---
 
 An independent [MIT](LICENSE) project. The bundled Acorn parser retains its [MIT license](vendor/acorn/LICENSE).
+
+Thanks to the [Linux DO](https://linux.do) community.
