@@ -2,9 +2,9 @@
 const fs = require('node:fs'), path = require('node:path');
 const base = path.join(__dirname, '..'), file = path.join(base, 'chatgpt-pro-counter.user.js');
 const canonical = value => value.replace(/\r\n/g, '\n');
-const transformer = canonical(fs.readFileSync(path.join(base, 'module-metadata-transform.browser.js'), 'utf8')).trim();
-const { pageMetadataRuntime } = require(path.join(base, 'metadata-page-runtime.cjs'));
-const { startPageMetadataBridge } = require(path.join(base, 'metadata-page-bootstrap.cjs'));
+const transformer = canonical(fs.readFileSync(path.join(base, 'src/metadata/module-metadata-transform.browser.js'), 'utf8')).trim();
+const { pageMetadataRuntime } = require(path.join(base, 'src/metadata/metadata-page-runtime.cjs'));
+const { startPageMetadataBridge } = require(path.join(base, 'src/metadata/metadata-page-bootstrap.cjs'));
 const begin = '  // BEGIN GENERATED PASSIVE METADATA RUNTIME', end = '  // END GENERATED PASSIVE METADATA RUNTIME';
 const block = [begin, '  // Bundles Acorn 8.17.0, MIT; see vendor/acorn/LICENSE. No external runtime downloads.', '  const metadataTransformerSource = ' + JSON.stringify(transformer) + ';', canonical(pageMetadataRuntime.toString()), canonical(startPageMetadataBridge.toString()), end].join('\n');
 let source = canonical(fs.readFileSync(file, 'utf8'));

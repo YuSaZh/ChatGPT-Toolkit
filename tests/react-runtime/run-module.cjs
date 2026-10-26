@@ -1,0 +1,25 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {JSDOM}=require('jsdom'),{buildSync}=require('esbuild');
+const {pageMetadataRuntime}=require('../../src/metadata/metadata-page-runtime.cjs');
+const {startPageMetadataBridge}=require('../../src/metadata/metadata-page-bootstrap.cjs');
+const transformerSource=fs.readFileSync(path.join(__dirname,'../../src/metadata/module-metadata-transform.browser.js'),'utf8');
+const bundle=buildSync({entryPoints:[path.join(__dirname,'./module-fixture.cjs')],bundle:true,write:false,platform:'browser',define:{'process.env.NODE_ENV':'"production"'}}).outputFiles[0].text;
+const wait=()=>new Promise(r=>setTimeout(r,30));
+(async()=>{
+ const dom=new JSDOM('<html><head><script nonce="fixture-nonce"></script></head><body><div id="app"></div></body></html>',{url:'https://fixture.invalid/c/chat-a',runScripts:'dangerously',pretendToBeVisual:true});
+ const w=dom.window;let requests=0;w.fetch=()=>{requests++;throw Error('network')};w.XMLHttpRequest=class{constructor(){requests++;throw Error('XHR')}};w.WebSocket=class{constructor(){requests++;throw Error('socket')}};
+ const bridge=startPageMetadataBridge(w,w.document,{runtimeSource:pageMetadataRuntime.toString(),transformerSource,enabled:true,key:'bridge-test'});
+ assert.equal(bridge.inspect().page,'ready');assert.equal(bridge.inspect().hook,'installed');
+ w.eval(bundle);await wait();const f=w.moduleFixture,initial=f.inspect();
+ assert.equal(initial.actionIdentity,true);const sourceButton=w.document.querySelector('[data-native-action]');assert.ok(sourceButton.nextElementSibling?.hasAttribute('data-chatgpt-toolkit-info'));sourceButton.click();assert.equal(f.inspect().actions,1);assert.equal(f.inspect().nativeCalls,2);
+ assert.equal(initial.legacyNodes,0);assert.equal(initial.labels.length,2);assert.equal(initial.nativeGets,1);assert.equal(initial.nativeCalls,2);assert.equal(bridge.inspect().factories,'3');
+ bridge.setEnabled(false);await wait();assert.equal(f.inspect().labels.length,0);assert.equal(f.inspect().nativeCalls,2);
+ bridge.setEnabled(true);await wait();assert.equal(f.inspect().labels.length,2);assert.equal(f.inspect().nativeCalls,2);assert.equal(f.inspect().nativeGets,1);
+ f.route('local-b','chat-b');await wait();assert.equal(f.inspect().labels.length,2);f.route('local-a','chat-a');await wait();assert.equal(f.inspect().labels.length,2);assert.equal(f.inspect().nativeGets,2,'cached history returns without a second selector execution');
+ f.hide(true);await wait();assert.equal(f.inspect().labels.length,0);f.hide(false,true);await wait();assert.equal(f.inspect().labels.length,0);f.hide(false,false);await wait();assert.equal(f.inspect().labels.length,2);
+ const beforeFormat=f.inspect().nativeCalls, format=w.Date.prototype.toLocaleTimeString; w.Date.prototype.toLocaleTimeString=()=>{throw Error('format failure')};bridge.setEnabled(false);await wait();bridge.setEnabled(true);await wait();assert.equal(f.inspect().labels.length,0);assert.equal(f.inspect().nativeCalls,beforeFormat);assert.equal(w.document.querySelectorAll('[data-native]').length,2);w.Date.prototype.toLocaleTimeString=format;bridge.setEnabled(false);await wait();bridge.setEnabled(true);await wait();assert.equal(f.inspect().labels.length,2);
+ bridge.invalidate();await wait();assert.equal(f.inspect().labels.length,0);f.reobserveOld();await wait();assert.equal(f.inspect().labels.length,0);f.fresh();await wait();assert.equal(f.inspect().labels.length,0,'unseen late old data cannot resume account-paused labels');assert.equal(bridge.inspect().account,'paused-account');
+ const error=new Error('native getter error');assert.throws(()=>f.throwOriginal(error),e=>e===error);assert.equal(requests,0);
+ console.log(JSON.stringify({passed:true,initial,final:f.inspect(),requests},null,2));f.unmount();bridge.destroy();dom.window.close();
+})().catch(e=>{console.error(e);process.exitCode=1});

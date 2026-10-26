@@ -1,0 +1,15 @@
+{
+  "name": "chatgpt-toolkit",
+  "private": true,
+  "description": "Development commands for the ChatGPT Toolkit userscript",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "node --check chatgpt-pro-counter.user.js && node tools/build-metadata-transform.cjs --check && node tools/build-page-metadata.cjs --check",
+    "build:metadata": "node tools/build-metadata-transform.cjs && node tools/build-page-metadata.cjs",
+    "test": "node --test tests/unit/*.test.cjs",
+    "test:react": "npm --prefix tests/react-runtime test"
+  }
+}

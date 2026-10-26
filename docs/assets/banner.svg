@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="300" viewBox="0 0 1280 300" role="img" aria-labelledby="title description">
+  <title id="title">ChatGPT Toolkit</title>
+  <desc id="description">Local usage, message details and optional sync for the ChatGPT web experience.</desc>
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#23363d"/></pattern>
+    <clipPath id="frame"><rect width="1280" height="300" rx="22"/></clipPath>
+  </defs>
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="300" fill="#10252d"/>
+    <rect x="815" width="465" height="300" fill="url(#grid)"/>
+    <path d="M810 0V300" stroke="#2d444b"/>
+    <path d="M0 0H1280" stroke="#a4ead4" stroke-width="6"/>
+    <g font-family="Consolas,monospace" font-size="13" letter-spacing="2">
+      <text x="62" y="59" fill="#a4ead4">CHATGPT.COM / USER SCRIPT</text>
+      <text x="62" y="254" fill="#93aab2">LOCAL USAGE</text>
+      <text x="244" y="254" fill="#93aab2">MESSAGE DETAILS</text>
+      <text x="465" y="254" fill="#93aab2">OPTIONAL SYNC</text>
+    </g>
+    <text x="58" y="143" fill="#f4f8f7" font-family="Trebuchet MS,Arial,sans-serif" font-size="63" font-weight="700" letter-spacing="-2">ChatGPT Toolkit</text>
+    <text x="62" y="188" fill="#b1c4cb" font-family="Trebuchet MS,Arial,sans-serif" font-size="23">A clearer view of your ChatGPT workspace.</text>
+    <path d="M62 215H740" stroke="#344b53"/>
+    <g transform="translate(884 51)">
+      <rect x="11" y="12" width="300" height="198" rx="16" fill="#081a20" opacity=".55"/>
+      <rect width="300" height="198" rx="16" fill="#17313a" stroke="#466068"/>
+      <path d="M0 48H300" stroke="#466068"/>
+      <circle cx="23" cy="24" r="4" fill="#a4ead4"/><circle cx="39" cy="24" r="4" fill="#63828c"/><circle cx="55" cy="24" r="4" fill="#63828c"/>
+      <text x="275" y="29" text-anchor="end" fill="#a4ead4" font-family="Consolas,monospace" font-size="11" letter-spacing="1">TOOLKIT</text>
+      <g transform="translate(22 69)">
+        <rect width="114" height="105" rx="10" fill="#a4ead4"/>
+        <path d="M30 29H82V64H54L41 75V64H30Z" fill="none" stroke="#17313a" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M42 41H70M42 51H62" stroke="#17313a" stroke-width="3" stroke-linecap="round"/>
+        <rect x="130" width="126" height="46" rx="10" fill="#213e47"/>
+        <circle cx="155" cy="23" r="11" fill="none" stroke="#a4ead4" stroke-width="2"/>
+        <path d="M155 16V23L160 26M179 19H237M179 27H217" fill="none" stroke="#a4ead4" stroke-width="2" stroke-linecap="round"/>
+        <rect x="130" y="59" width="126" height="46" rx="10" fill="#213e47"/>
+        <path d="M145 82A11 11 0 0 1 164 74M164 69V75H158M164 82A11 11 0 0 1 145 90M145 95V89H151" fill="none" stroke="#e9bd82" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M179 78H237M179 86H222" stroke="#e9bd82" stroke-width="2" stroke-linecap="round"/>
+      </g>
+    </g>
+  </g>
+</svg>
