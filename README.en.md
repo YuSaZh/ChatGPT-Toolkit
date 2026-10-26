@@ -31,6 +31,33 @@ ChatGPT Toolkit is an independent userscript for **chatgpt.com**, with a local P
 
 The compact panel follows light and dark themes. Its record list scrolls independently, message labels stay inline, and idle pages do not repeatedly scan for labels.
 
+## Interface preview
+
+These screenshots show the Chinese interface.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+<h3>Usage hover card</h3>
+<p>Hover over Send or Start voice to check your local usage estimate.</p>
+<img src="docs/assets/screenshots/usage-card.png" alt="Usage hover card" width="100%">
+
+<h3>Message details</h3>
+<p>The actual response model and time appear beside the message actions.</p>
+<img src="docs/assets/screenshots/message-info.png" alt="Message details" width="100%">
+
+</td>
+<td width="50%" valign="top">
+
+<h3>Floating panel</h3>
+<p>Manage usage, records, settings and sync in one place.</p>
+<img src="docs/assets/screenshots/usage-panel.png" alt="Floating panel" width="100%">
+
+</td>
+</tr>
+</table>
+
 ## Get started
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/). WebDAV requires **5.5.1+**.

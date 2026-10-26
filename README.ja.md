@@ -31,6 +31,33 @@ ChatGPT Toolkit は **chatgpt.com** 向けの独立したユーザースクリ�
 
 コンパクトなパネルはライト / ダークテーマに対応しています。記録リストだけをスクロールでき、モデルと時刻はメッセージ内に配置されます。ページが静止している間、ラベルの再走査を繰り返しません。
 
+## 画面イメージ
+
+スクリーンショットは中国語の画面です。
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+<h3>使用量カード</h3>
+<p>送信・音声開始ボタンにカーソルを合わせて、ローカルの推定使用量を確認。</p>
+<img src="docs/assets/screenshots/usage-card.png" alt="使用量カード" width="100%">
+
+<h3>メッセージ情報</h3>
+<p>実際の応答モデルと時刻を、メッセージの操作ボタン横に表示。</p>
+<img src="docs/assets/screenshots/message-info.png" alt="メッセージ情報" width="100%">
+
+</td>
+<td width="50%" valign="top">
+
+<h3>フローティングパネル</h3>
+<p>使用量、記録、設定、同期をまとめて管理。</p>
+<img src="docs/assets/screenshots/usage-panel.png" alt="フローティングパネル" width="100%">
+
+</td>
+</tr>
+</table>
+
 ## はじめに
 
 1. [Tampermonkey](https://www.tampermonkey.net/) をインストールします。WebDAV には **5.5.1 以降**が必要です。

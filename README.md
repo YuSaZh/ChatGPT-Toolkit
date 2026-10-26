@@ -31,6 +31,31 @@ ChatGPT Toolkit 是用于 **chatgpt.com** 的独立用户脚本，提供 Pro 本
 
 紧凑面板适配深浅主题。记录列表独立滚动，消息标签随原消息内联排版；页面静止时不反复扫描标签。
 
+## 界面展示
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+<h3>悬浮用量卡片</h3>
+<p>悬停发送或开始语音按钮，快速查看本机用量估算。</p>
+<img src="docs/assets/screenshots/usage-card.png" alt="悬浮用量卡片" width="100%">
+
+<h3>消息信息扩展</h3>
+<p>实际响应模型与时间直接显示在消息操作区。</p>
+<img src="docs/assets/screenshots/message-info.png" alt="消息信息扩展" width="100%">
+
+</td>
+<td width="50%" valign="top">
+
+<h3>悬浮面板</h3>
+<p>集中管理用量、记录、设置与同步。</p>
+<img src="docs/assets/screenshots/usage-panel.png" alt="悬浮面板" width="100%">
+
+</td>
+</tr>
+</table>
+
 ## 开始使用
 
 1. 安装 [Tampermonkey（篡改猴）](https://www.tampermonkey.net/)。WebDAV 功能要求 **5.5.1+**。
